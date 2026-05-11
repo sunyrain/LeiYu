@@ -21,8 +21,7 @@ const HOST = process.env.HOST || '0.0.0.0'
 const PORT = Number(process.env.PORT || 3000)
 const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1'
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
-const OPEN_ADMIN = process.env.FY_OPEN_ADMIN === '1'
-const ADMIN_PIN = OPEN_ADMIN ? '' : String(process.env.ADMIN_PIN || '')
+const ADMIN_PIN = String(process.env.ADMIN_PIN || '')
 
 const phaseOrder = ['entry', 'prologue', 'act1', 'act2', 'act3', 'act4']
 const phaseToAnswerIndex = { act1: 0, act2: 1, act3: 2, act4: 3 }

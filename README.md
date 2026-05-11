@@ -1,52 +1,52 @@
 # 蘩漪的2026号房间
 
-这是一个面向现场演出的观众交互系统。观众用手机进入 2026 号房间，跟随文本、选择题、自由书写和 LLM 生成内容完成四段交互；舞监通过 `/admin` 控制全场阶段和页码，并实时查看观众提交。
+面向现场演出的观众互动系统。观众用手机进入 2026 号房间，跟随文本、选择题、自由书写和 LLM 生成素材完成四段交互；舞监通过 `/admin` 控制阶段和页码，并实时查看观众提交。
 
-当前版本已经从单机前端原型升级为“笔记本实体后端”架构：同一台电脑同时运行后端、托管观众端和舞监端。观众和舞监设备只需要访问这台电脑的局域网 IP。
+这个仓库是 GitHub 发布版，只保留运行和二次开发需要的代码、素材、脚本和文档。开发过程截图、旧草稿、调试日志、设计源文件和现场运行数据不进入版本库。
 
-## 当前能力
+## 功能
 
-- 观众端完整剧情链路：进场、序章、交互 1、交互 2、交互 3、交互 4、结束页。
-- 舞监控制台：阶段切换、上一页/下一页、在线人数、提交统计、四轮答案列表、重置、触发 LLM 重新生成。
-- 后端同步：Node.js + WebSocket，舞监指令会广播到观众端，多设备不再依赖 `localStorage`。
-- 后端托管：后端直接托管 `app/dist`，观众端 `/` 和舞监端 `/admin` 都来自同一台电脑。
-- LLM 代理：前端不再包含 DeepSeek API Key，生成请求走后端 `/api/generate-materials`。
-- 失败降级：没有 API Key 或 LLM 失败时，后端返回本地 fallback 素材，不阻塞现场流程。
-- 数据持久化：后端把演出状态、答案和生成素材写入 `data/`。
-- 导出接口：支持 `/api/export/answers.json` 和 `/api/export/answers.csv`。
+- 观众端：进场、序章、交互 1 到交互 4、结束页。
+- 舞监端：阶段切换、上一页/下一页、在线人数、提交统计、答案列表、重置、触发 LLM 重新生成。
+- 后端同步：Node.js + WebSocket，同一台电脑托管观众端 `/` 和舞监端 `/admin`。
+- 数据保存：状态、答案和生成素材写入本地 `data/`。
+- 答案导出：支持 JSON 和 CSV。
+- LLM 代理：DeepSeek API Key 只放后端环境变量；没有 Key 或请求失败时自动使用本地 fallback。
 
-## 目录结构
+## 目录
 
 ```text
 .
 ├── README.md
-├── package.json                     # 根脚本：安装、构建、启动演出
-├── start-show.ps1                   # Windows 一键构建并启动
-├── app/                             # Vue 3 + Vite 前端
-│   ├── src/views/StoryView.vue      # 观众端容器
-│   ├── src/views/AdminView.vue      # 舞监控制台
-│   ├── src/views/phases/            # 各阶段页面
-│   ├── src/stores/game.js           # 观众端本地展示状态
-│   ├── src/services/backend.js      # WebSocket/HTTP 后端接入
-│   └── src/llm.js                   # 调用后端 LLM 代理
-├── server/                          # 笔记本实体后端
-│   ├── package.json
+├── package.json
+├── start-show.ps1              # 局域网现场启动
+├── start-local-only.ps1        # 只允许本机访问
+├── start-public-once.ps1       # 一次性公网启动, 需要后台口令
+├── app/                        # Vue 3 + Vite 前端
+│   ├── public/                 # 运行时图片和字体
+│   └── src/
+│       ├── views/              # 观众端和舞监端页面
+│       ├── stores/game.js      # 观众状态、答案元数据
+│       └── services/backend.js # WebSocket/HTTP 接入
+├── server/                     # HTTP + WebSocket 后端
 │   ├── .env.example
 │   └── src/
-│       ├── index.js                 # HTTP + WebSocket + 静态托管
-│       └── prompt.js                # LLM prompt 与 fallback
-└── data/                            # 运行时生成，已加入 .gitignore
+│       ├── index.js
+│       └── prompt.js
+└── docs/
+    ├── USAGE_AND_CONTENT.md
+    └── GITHUB_RELEASE.md
 ```
 
 ## 快速启动
 
-首次安装：
+首次安装依赖：
 
 ```powershell
 npm run install:all
 ```
 
-启动现场版本：
+启动局域网现场版：
 
 ```powershell
 npm run start:show
@@ -64,133 +64,59 @@ npm run start:show
 - 舞监端：`http://localhost:3000/admin`
 - 健康检查：`http://localhost:3000/api/health`
 
-局域网内给观众使用时，把 `localhost` 换成笔记本 IP，例如：
-
-- 观众二维码：`http://192.168.10.10:3000/`
-- 舞监控制台：`http://192.168.10.10:3000/admin`
-
-## 推荐现场拓扑
+给观众手机使用时，把 `localhost` 换成现场电脑的局域网 IP，例如：
 
 ```text
-观众手机
-   │
-   │ 专用 Wi-Fi
-   ▼
-独立路由器
-   │
-   │ 建议网线连接
-   ▼
-笔记本后端 + 舞监
-   - Node.js 后端
-   - 静态前端托管
-   - WebSocket 同步
-   - 答案持久化
-   - LLM 代理和 fallback
-   - 同机打开 /admin
+http://192.168.10.10:3000/
+http://192.168.10.10:3000/admin
 ```
 
-这种方案是可行的，并且适合现场控制。普通近年笔记本承载几十到一两百名观众通常没有问题，瓶颈更可能是 Wi-Fi 质量和外部 LLM 响应。
+只在本机测试：
 
-## 现场电脑配置
+```powershell
+.\start-local-only.ps1
+```
 
-- 使用独立路由器，不依赖剧场公共 Wi-Fi。
-- 笔记本接电源。
-- 关闭系统休眠、自动更新和省电网络策略。
-- 给笔记本固定局域网 IP，例如 `192.168.10.10`。
-- Windows 防火墙允许 Node.js 或端口 `3000` 入站。
-- 演前用两台以上手机测试 `/` 能被舞监 `/admin` 控制。
-- 如果现场没有稳定外网，不填 LLM Key，系统会自动用 fallback 素材。
+一次性公网演示需要后台口令：
 
-## LLM 配置
+```powershell
+.\start-public-once.ps1 -AdminPin "至少8位的后台口令"
+```
 
-复制配置文件：
+公网模式会监听 `0.0.0.0:3000`。不要公开分享 admin 地址，演出结束后立即停止进程。
+
+## 配置
+
+复制环境变量示例：
 
 ```powershell
 Copy-Item server\.env.example server\.env
 ```
 
-在 `server/.env` 中填写：
+常用配置：
 
 ```env
 HOST=0.0.0.0
 PORT=3000
-DEEPSEEK_API_KEY=你的密钥
+ADMIN_PIN=your-admin-pin
+DEEPSEEK_API_KEY=
 DEEPSEEK_BASE_URL=https://api.deepseek.com/v1
 DEEPSEEK_MODEL=deepseek-chat
 ```
 
-不填写 `DEEPSEEK_API_KEY` 也能运行，后端会返回本地 fallback。前端构建产物中不再包含 API Key。
+- `ADMIN_PIN`：后台口令。公网运行时必须设置。
+- `DEEPSEEK_API_KEY`：可选。不填也能跑，系统会使用 fallback 素材。
+- `HOST`：局域网现场通常用 `0.0.0.0`；本机测试可用 `127.0.0.1`。
 
-已经暴露过的旧前端 Key 应立即在 DeepSeek 后台撤销。
+## 使用和改文案
 
-## 当前架构
+给运营、导演、舞监和后续开发者的详细说明见：
 
-```text
-┌──────────────────────┐
-│ 观众手机 /            │
-└──────────┬───────────┘
-           │ HTTP + WebSocket
-           ▼
-┌──────────────────────────────────┐
-│ 笔记本 Node 后端                  │
-│ - 托管 app/dist                   │
-│ - /ws 广播舞监状态                │
-│ - /api/generate-materials         │
-│ - /api/export/answers.csv/json    │
-│ - data/*.json 持久化              │
-└──────────┬───────────────────────┘
-           ▲
-           │ HTTP + WebSocket
-┌──────────┴───────────┐
-│ 舞监 /admin           │
-└──────────────────────┘
-```
+- [docs/USAGE_AND_CONTENT.md](docs/USAGE_AND_CONTENT.md)
 
-后端是唯一全局状态来源。舞监端发出的 `phase/page` 变化会进入后端，再由后端广播给所有观众端。观众提交答案也进入后端，再聚合给舞监端。
+这份文档说明了如何启动演出、导出数据、修改剧情文案、修改选择题、调整阶段页数、替换背景、修改 LLM prompt 和 fallback。
 
-## 事件与接口
-
-WebSocket：
-
-```text
-client:hello
-audience:join
-audience:submit-answer
-admin:set-state
-admin:reset
-admin:trigger-llm
-server:state
-server:stats
-server:reset
-server:llm-trigger
-server:error
-```
-
-HTTP：
-
-```text
-GET  /api/health
-GET  /api/state
-GET  /api/answers
-GET  /api/export/answers.json
-GET  /api/export/answers.csv
-POST /api/reset
-POST /api/generate-materials
-```
-
-## 数据保存
-
-运行后端时会生成：
-
-```text
-data/show-state.json
-data/answers.json
-data/materials.json
-```
-
-这些文件是现场运行数据，默认不提交到版本库。演出结束后可以通过导出接口保存答案，也可以直接备份 `data/`。
-
-## 开发模式
+## 开发
 
 分别启动后端和前端：
 
@@ -199,31 +125,53 @@ npm run dev:server
 npm run dev:app
 ```
 
-开发前端默认在 `5173`，Vite 已代理：
+开发前端默认运行在 `5173`，Vite 会代理：
 
-- `/api` -> `http://127.0.0.1:3000`
-- `/ws` -> `ws://127.0.0.1:3000`
+```text
+/api -> http://127.0.0.1:3000
+/ws  -> ws://127.0.0.1:3000
+```
 
-## 验证记录
+构建生产前端：
 
-已完成的本地验证：
+```powershell
+npm run build
+```
 
-- `npm --prefix app run build` 通过。
-- `node --check server/src/index.js` 通过。
-- 后端 `/api/health` 可访问。
-- WebSocket 可完成舞监设置阶段、观众接收阶段、观众提交答案、舞监收到统计。
-- `/api/generate-materials` 在无 Key 情况下返回 fallback。
-- 构建产物中未再检出 `sk-` 或 `api.deepseek.com`。
+后端会托管 `app/dist`。
 
-## 演前检查清单
+## 数据
 
-- `npm run install:all` 已完成。
-- `server/.env` 已确认，是否需要 LLM Key 已明确。
-- `npm run start:show` 能启动。
-- 本机能打开 `/admin`。
-- 至少两台手机能打开 `/`。
-- 舞监切换阶段后，两台手机同步变化。
-- 提交答案后，舞监端统计和答案列表更新。
-- `http://笔记本IP:3000/api/export/answers.csv` 能下载。
-- 电脑不会休眠，防火墙已放行。
-- 已准备备用路由器、网线、电源和本地 fallback 流程。
+运行时会生成：
+
+```text
+data/show-state.json
+data/answers.json
+data/materials.json
+```
+
+这些是现场数据，不提交到 Git。演出结束后可用接口导出：
+
+```text
+http://你的主机:3000/api/export/answers.json
+http://你的主机:3000/api/export/answers.csv
+```
+
+如果设置了 `ADMIN_PIN`，导出接口需要带口令：
+
+```text
+http://你的主机:3000/api/export/answers.csv?pin=你的口令
+```
+
+## 发布
+
+GitHub 发布前检查见：
+
+- [docs/GITHUB_RELEASE.md](docs/GITHUB_RELEASE.md)
+
+最小验证命令：
+
+```powershell
+npm run build
+node --check server/src/index.js
+```

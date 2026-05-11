@@ -1,6 +1,5 @@
 param(
-  [string]$HostIp = "",
-  [switch]$OpenPublicDemo
+  [string]$HostIp = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -19,7 +18,7 @@ function Test-PrivateIPv4 {
 
 function Get-ShowHostIp {
   if ($HostIp) {
-    if (-not (Test-PrivateIPv4 $HostIp) -and -not $OpenPublicDemo) {
+    if (-not (Test-PrivateIPv4 $HostIp)) {
       throw "Refusing to bind to public IP $HostIp. Use a private LAN IP such as 192.168.137.1."
     }
     return $HostIp
@@ -55,29 +54,13 @@ http://192.168.137.1:3000/
 $displayHost = Get-ShowHostIp
 $bindHost = $displayHost
 
-if ($OpenPublicDemo -and -not (Test-PrivateIPv4 $displayHost)) {
-  $bindHost = "0.0.0.0"
-  $env:FY_OPEN_ADMIN = "1"
-  $env:VITE_OPEN_ADMIN = "1"
-} else {
-  Remove-Item Env:\FY_OPEN_ADMIN -ErrorAction SilentlyContinue
-  Remove-Item Env:\VITE_OPEN_ADMIN -ErrorAction SilentlyContinue
-}
-
 Write-Host "Building audience/admin frontend..."
 npm --prefix app run build
 
 Write-Host ""
-if ($OpenPublicDemo) {
-  Write-Host "Starting TEMPORARY PUBLIC DEMO backend..."
-  Write-Host "Audience URL: http://${displayHost}:3000/"
-  Write-Host "Admin URL:    http://${displayHost}:3000/admin"
-  Write-Host "Admin PIN check is disabled for this demo run."
-} else {
-  Write-Host "Starting show backend on private LAN only..."
-  Write-Host "Audience URL: http://${displayHost}:3000/"
-  Write-Host "Admin URL:    http://${displayHost}:3000/admin"
-}
+Write-Host "Starting show backend on private LAN only..."
+Write-Host "Audience URL: http://${displayHost}:3000/"
+Write-Host "Admin URL:    http://${displayHost}:3000/admin"
 Write-Host ""
 
 $env:HOST = $bindHost

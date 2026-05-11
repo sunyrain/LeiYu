@@ -119,8 +119,7 @@ const currentPage = ref(0)
 const activeTab = ref(0)
 const answers = ref([[], [], [], []])
 const pinInput = ref(getAdminPin())
-const openAdmin = import.meta.env.VITE_OPEN_ADMIN === '1'
-const adminUnlocked = ref(openAdmin || Boolean(getAdminPin()))
+const adminUnlocked = ref(Boolean(getAdminPin()))
 const authError = ref('')
 
 const phaseLabels = {
