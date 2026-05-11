@@ -1,0 +1,62 @@
+{
+  "entry": {
+    "top": 321,
+    "bottom": 524,
+    "contentCenter": 422,
+    "viewportCenter": 422,
+    "scrollHeight": 844,
+    "clientHeight": 844,
+    "stageLayers": 1,
+    "previousLayers": 0
+  },
+  "act1Textarea": {
+    "top": 321,
+    "bottom": 524,
+    "contentCenter": 422,
+    "viewportCenter": 422,
+    "scrollHeight": 844,
+    "clientHeight": 844,
+    "stageLayers": 1,
+    "previousLayers": 0
+  },
+  "act4Choices": {
+    "top": 321,
+    "bottom": 524,
+    "contentCenter": 422,
+    "viewportCenter": 422,
+    "scrollHeight": 844,
+    "clientHeight": 844,
+    "stageLayers": 1,
+    "previousLayers": 0
+  },
+  "act2Choices": {
+    "top": 321,
+    "bottom": 524,
+    "contentCenter": 422,
+    "viewportCenter": 422,
+    "scrollHeight": 844,
+    "clientHeight": 844,
+    "stageLayers": 1,
+    "previousLayers": 0
+  },
+  "crossfadeMidpoint": {
+    "top": 321,
+    "bottom": 524,
+    "contentCenter": 422,
+    "viewportCenter": 422,
+    "scrollHeight": 844,
+    "clientHeight": 844,
+    "stageLayers": 1,
+    "previousLayers": 0
+  },
+  "crossfadeAfter": {
+    "top": 321,
+    "bottom": 524,
+    "contentCenter": 422,
+    "viewportCenter": 422,
+    "scrollHeight": 844,
+    "clientHeight": 844,
+    "stageLayers": 1,
+    "previousLayers": 0
+  }
+}
