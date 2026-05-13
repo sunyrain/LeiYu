@@ -65,6 +65,7 @@ Write-Host "Copying runtime files..."
 
 Copy-RootFile 'README.md'
 Copy-RootFile 'package.json'
+Copy-RootFile 'RUN_SHOW.bat'
 Copy-RootFile 'start-one-click.ps1'
 Copy-RootFile 'make-portable-kit.ps1'
 Copy-RootFile 'start-local-only.ps1'

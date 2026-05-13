@@ -76,7 +76,7 @@ npm run start:one-click
 .\make-portable-kit.ps1
 ```
 
-详见 [docs/SWITCH_COMPUTER.md](docs/SWITCH_COMPUTER.md)。
+在新电脑解压后，优先双击 `RUN_SHOW.bat` 启动。详见 [docs/SWITCH_COMPUTER.md](docs/SWITCH_COMPUTER.md)。
 
 启动局域网现场版：
 

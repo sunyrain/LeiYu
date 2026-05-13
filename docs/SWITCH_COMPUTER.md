@@ -49,7 +49,17 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ## 3. 在新电脑启动
 
-解压 zip，进入解压后的目录，然后运行：
+解压 zip，进入解压后的目录。
+
+最稳妥的方式是双击：
+
+```text
+RUN_SHOW.bat
+```
+
+这个入口会自动绕过 PowerShell 执行策略，并且如果启动失败会停在窗口里显示错误。
+
+也可以手动在 PowerShell 里运行：
 
 ```powershell
 .\start-one-click.ps1 -AdminPin LeiYu2026Check
