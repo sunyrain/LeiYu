@@ -26,65 +26,145 @@
       </div>
     </header>
 
-    <section class="phase-control">
-      <h2>当前阶段</h2>
+    <section class="show-control">
+      <h2>演出控制</h2>
       <div class="current-state">
         <span class="phase-badge">{{ phaseLabels[currentPhase] }}</span>
         <span class="page-num">第 {{ currentPage + 1 }} 页</span>
       </div>
 
-      <div class="phase-buttons">
-        <button v-for="(label, key) in phaseLabels" :key="key"
-          class="phase-btn" :class="{ active: currentPhase === key }"
-          @click="switchPhase(key)">
-          {{ label }}
-        </button>
+      <div class="control-group">
+        <div class="control-group-title">阶段</div>
+        <div class="phase-buttons">
+          <button v-for="(label, key) in controllablePhaseLabels" :key="key"
+            class="phase-btn" :class="{ active: currentPhase === key }"
+            @click="switchPhase(key)">
+            {{ label }}
+          </button>
+        </div>
       </div>
-    </section>
 
-    <section class="page-control">
-      <h2>页面控制</h2>
-      <div class="page-nav">
-        <button class="nav-btn" @click="prevPage" :disabled="currentPage <= 0">← 上一页</button>
-        <span class="page-indicator">{{ currentPage + 1 }} / {{ maxPages[currentPhase] || '?' }}</span>
-        <button class="nav-btn" @click="nextPageCmd">下一页 →</button>
-      </div>
-    </section>
-
-    <section class="stats-section">
-      <h2>观众统计</h2>
-      <div class="stats-grid">
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.totalSubmissions }}</div>
-          <div class="stat-label">总提交数</div>
+      <div class="control-group">
+        <div class="control-group-title">总控节点</div>
+        <div class="cue-buttons">
+          <button
+            v-for="cue in currentPhaseCues"
+            :key="cue.code"
+            class="cue-btn"
+            :class="{ active: isCueActive(cue) }"
+            @click="jumpToCue(cue)"
+          >
+            <span class="cue-code">{{ cue.code }}</span>
+            <span class="cue-target">{{ phaseLabels[cue.phase] }} · 第 {{ cue.page + 1 }} 页</span>
+          </button>
         </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.currentRoundSubmissions }}</div>
-          <div class="stat-label">本轮提交</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ audienceCount }}</div>
-          <div class="stat-label">在线人数</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value">{{ stats.completionRate }}%</div>
-          <div class="stat-label">完成率</div>
-        </div>
+        <div v-if="currentPhaseCues.length === 0" class="cue-empty">当前阶段没有总控节点</div>
       </div>
     </section>
 
     <section class="answers-section">
-      <h2>观众回答</h2>
-      <div class="answer-tabs">
-        <button v-for="(label, idx) in ['交互1', '交互2', '交互3', '交互4']" :key="idx"
-          class="tab-btn" :class="{ active: activeTab === idx }"
-          @click="activeTab = idx">{{ label }}</button>
+      <div class="section-title-row">
+        <h2>观众回答</h2>
+        <div class="answer-export-actions">
+          <button class="export-btn" @click="downloadAnswers('csv')">导出 CSV</button>
+          <button class="export-btn" @click="downloadAnswers('json')">导出 JSON</button>
+        </div>
       </div>
-      <div class="answer-list">
-        <div v-if="currentAnswers.length === 0" class="empty-state">暂无数据</div>
-        <div v-for="(answer, i) in currentAnswers" :key="i" class="answer-item">
-          <span class="answer-room">{{ answer.room }}号</span>
-          <span class="answer-text">{{ answer.text }}</span>
+      <div class="answer-tabs">
+        <button v-for="tab in answerPhaseTabs" :key="tab.phase"
+          class="tab-btn" :class="{ active: activeTab === tab.index }"
+          @click="activeTab = tab.index">
+          <span>{{ tab.label }}</span>
+          <span class="tab-count">{{ phaseAnswerCounts[tab.index] || 0 }}</span>
+        </button>
+      </div>
+      <div class="answer-groups">
+        <div v-if="currentAnswerGroups.length === 0" class="empty-state">暂无数据</div>
+        <article
+          v-for="group in currentAnswerGroups"
+          :key="group.key"
+          class="answer-group"
+          :class="{ expanded: expandedAnswerGroup === group.key }"
+        >
+          <button
+            type="button"
+            class="answer-group-head"
+            :aria-expanded="expandedAnswerGroup === group.key"
+            @click="toggleAnswerGroup(group.key)"
+          >
+            <span>
+              <span class="answer-group-title-row">
+                <span class="answer-group-title">{{ group.title }}</span>
+                <span class="answer-rate-pill">{{ group.completionRate }}%</span>
+              </span>
+              <span class="answer-group-meta">
+                {{ group.completionAnswered }}/{{ group.completionTotal }} 人 · {{ group.count }} 条 · 最新 {{ formatAnswerTime(group.latestTime) }}
+              </span>
+            </span>
+            <span class="answer-group-toggle">{{ expandedAnswerGroup === group.key ? '收起' : '展开' }}</span>
+          </button>
+          <div class="completion-bar" aria-hidden="true">
+            <span :style="{ width: `${group.completionRate}%` }"></span>
+          </div>
+          <div v-if="expandedAnswerGroup === group.key" class="answer-group-body">
+            <div class="answer-summary">
+              <span v-for="item in group.summary" :key="item.label" class="summary-chip">
+                <span>{{ item.label }}</span>
+                <strong>{{ item.count }}</strong>
+              </span>
+            </div>
+            <div class="answer-preview">
+              <span>最近</span>
+              <p>{{ group.latestText }}</p>
+            </div>
+            <div class="answer-detail-list">
+              <div v-for="answer in group.items" :key="answer.id || `${answer.sessionId}-${answer.questionId}-${answer.time}`" class="answer-item">
+                <span class="answer-room">
+                  <span>{{ answer.room }}号</span>
+                  <span v-if="answer.sessionCode" class="answer-session">ID {{ answer.sessionCode }}</span>
+                </span>
+                <span class="answer-text">{{ answer.text }}</span>
+                <span class="answer-time">{{ formatAnswerTime(answer.time) }}</span>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="monologue-section">
+      <h2>演员独白</h2>
+      <div class="monologue-actions">
+        <button
+          v-for="item in monologueTypes"
+          :key="item.kind"
+          class="action-btn"
+          :disabled="monologueBusy === item.kind"
+          @click="generateActorMonologue(item.kind)"
+        >
+          <span class="monologue-action-main">{{ monologueBusy === item.kind ? '生成中...' : item.label }}</span>
+          <span class="monologue-action-rate">{{ monologueReadinessLabel(item.kind) }}</span>
+        </button>
+      </div>
+      <div v-if="monologueError" class="admin-error">{{ monologueError }}</div>
+      <div class="monologue-grid">
+        <div v-for="item in monologueTypes" :key="item.kind" class="monologue-card">
+          <div class="monologue-title">{{ item.title }}</div>
+          <div class="monologue-readiness">
+            <span>{{ monologueReadinessLabel(item.kind) }}</span>
+            <span v-if="getMonologueReadiness(item.kind).details.length">最低单题 {{ getMonologueReadiness(item.kind).minRate }}%</span>
+          </div>
+          <div v-if="getMonologueReadiness(item.kind).details.length" class="monologue-question-list">
+            <span
+              v-for="detail in getMonologueReadiness(item.kind).details"
+              :key="detail.questionId"
+              class="monologue-question-chip"
+            >
+              {{ answerQuestionLabels[detail.questionId] || detail.questionId }} {{ detail.rate }}%
+            </span>
+          </div>
+          <p v-if="latestMonologues[item.kind]?.text">{{ latestMonologues[item.kind].text }}</p>
+          <p v-else class="empty-state">尚未生成</p>
         </div>
       </div>
     </section>
@@ -92,7 +172,6 @@
     <section class="quick-actions">
       <h2>快捷操作</h2>
       <div class="action-buttons">
-        <button class="action-btn" @click="triggerLLM">触发LLM生成</button>
         <button class="action-btn danger" @click="resetAll">重置所有</button>
       </div>
     </section>
@@ -100,16 +179,17 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onUnmounted } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import {
   backendStatus,
   getAdminPin,
   connectBackend,
+  fetchMonologues,
+  generateMonologue,
   onBackendEvent,
   resetShow,
   setAdminPin,
   setShowState,
-  triggerLlm,
 } from '../services/backend.js'
 
 const connected = computed(() => backendStatus.connected)
@@ -117,7 +197,15 @@ const audienceCount = ref(0)
 const currentPhase = ref('entry')
 const currentPage = ref(0)
 const activeTab = ref(0)
+const expandedAnswerGroup = ref('')
 const answers = ref([[], [], [], []])
+const latestMonologues = ref({
+  monologue1: null,
+  monologue2: null,
+  monologue3: null,
+})
+const monologueBusy = ref('')
+const monologueError = ref('')
 const pinInput = ref(getAdminPin())
 const adminUnlocked = ref(Boolean(getAdminPin()))
 const authError = ref('')
@@ -131,22 +219,83 @@ const phaseLabels = {
   act4: '交互4',
 }
 
-const maxPages = {
-  entry: 2,
-  prologue: 10,
-  act1: 14,
-  act2: 9,
-  act3: 9,
-  act4: 7,
+const controllablePhaseLabels = {
+  entry: phaseLabels.entry,
+  act1: phaseLabels.act1,
+  act2: phaseLabels.act2,
+  act3: phaseLabels.act3,
+  act4: phaseLabels.act4,
 }
 
 const stats = ref({
+  audienceTotal: 0,
   totalSubmissions: 0,
   currentRoundSubmissions: 0,
   completionRate: 0,
+  questionCompletion: {},
+  monologueReadiness: {},
 })
 
+const answerPhaseTabs = [
+  { index: 0, phase: 'act1', label: '交互1' },
+  { index: 1, phase: 'act2', label: '交互2' },
+  { index: 2, phase: 'act3', label: '交互3' },
+  { index: 3, phase: 'act4', label: '交互4' },
+]
+
+const answerQuestionOrder = {
+  act1: ['floodItem', 'lovedOneName', 'departureAction', 'reunionAction'],
+  act2: ['noticeAction', 'riverAction'],
+  act3: ['roomBase', 'identity', 'poemMaterials'],
+  act4: ['mirrorSelf', 'finalTransform', 'objectAction', 'finalAction'],
+}
+
+const answerQuestionLabels = {
+  floodItem: '暴雨中带走的三件物品',
+  lovedOneName: '心中想起的人',
+  departureAction: 'Ta 要走了，你想',
+  reunionAction: '如果 Ta 重新出现',
+  noticeAction: '你忽然想要',
+  riverAction: '河水涨到脚边',
+  roomBase: '房间构成',
+  identity: '看见房间后',
+  poemMaterials: '生成素材',
+  mirrorSelf: '镜子里是',
+  finalTransform: '名字正在变成',
+  objectAction: '物件亮晶晶时',
+  finalAction: '最终结局',
+}
+
 const currentAnswers = computed(() => answers.value[activeTab.value] || [])
+const currentAnswerPhase = computed(() => answerPhaseTabs[activeTab.value] || answerPhaseTabs[0])
+const phaseAnswerCounts = computed(() => answerPhaseTabs.map(tab => (answers.value[tab.index] || []).length))
+const currentAnswerGroups = computed(() => groupAnswersByQuestion(currentAnswers.value, currentAnswerPhase.value.phase))
+
+const monologueTypes = [
+  { kind: 'monologue1', label: '生成独白1', title: '独白1-呼唤爱人', questions: ['lovedOneName'] },
+  { kind: 'monologue2', label: '生成独白2', title: '独白2-动作指令', questions: [] },
+  { kind: 'monologue3', label: '生成独白3', title: '独白3-想象房间', questions: ['roomBase'] },
+]
+
+const showCues = [
+  { code: '交互1-1', phase: 'act1', page: 0 },
+  { code: '交互1-2', phase: 'act1', page: 6 },
+  { code: '交互1-3', phase: 'act1', page: 7 },
+  { code: '交互2-1', phase: 'act2', page: 0 },
+  { code: '交互2-2', phase: 'act2', page: 4 },
+  { code: '交互2-3', phase: 'act2', page: 6 },
+  { code: '交互3-1', phase: 'act3', page: 0 },
+  { code: '交互3-2', phase: 'act3', page: 4 },
+  { code: '交互4', phase: 'act4', page: 0 },
+]
+
+const currentPhaseCues = computed(() => showCues.filter(cue => cue.phase === currentPhase.value))
+
+watch(currentAnswerGroups, groups => {
+  if (!groups.length || !groups.some(group => group.key === expandedAnswerGroup.value)) {
+    expandedAnswerGroup.value = ''
+  }
+}, { immediate: true })
 
 let removeStateListener = null
 let removeStatsListener = null
@@ -156,18 +305,181 @@ function switchPhase(phase) {
   setShowState(phase, 0)
 }
 
-function prevPage() {
-  if (currentPage.value > 0) {
-    setShowState(currentPhase.value, currentPage.value - 1)
+function jumpToCue(cue) {
+  setShowState(cue.phase, cue.page)
+}
+
+function isCueActive(cue) {
+  return currentPhase.value === cue.phase && currentPage.value === cue.page
+}
+
+function groupAnswersByQuestion(list, phase) {
+  const groups = new Map()
+  const order = answerQuestionOrder[phase] || []
+
+  order.forEach(questionId => {
+    groups.set(questionId, {
+      key: `${phase}-${questionId}`,
+      questionId,
+      title: answerQuestionLabels[questionId] || questionId,
+      items: [],
+    })
+  })
+
+  list.forEach(answer => {
+    const questionId = answer.questionId || 'unknown'
+    if (!groups.has(questionId)) {
+      groups.set(questionId, {
+        key: `${phase}-${questionId}`,
+        questionId,
+        title: answerQuestionLabels[questionId] || questionId || '未分类',
+        items: [],
+      })
+    }
+    groups.get(questionId).items.push(answer)
+  })
+
+  return [...groups.values()]
+    .map(group => {
+      const items = [...group.items].sort((a, b) => Number(b.time || 0) - Number(a.time || 0))
+      const users = new Set(items.map(item => item.sessionId || `${item.room}-${item.sessionCode}`).filter(Boolean))
+      const latest = items[0] || {}
+      const completion = getQuestionCompletion(group.questionId)
+      return {
+        ...group,
+        items,
+        count: items.length,
+        uniqueUsers: completion.answered || users.size || items.length,
+        completionRate: completion.rate,
+        completionAnswered: completion.answered,
+        completionTotal: completion.total,
+        latestTime: Number(latest.time || 0),
+        latestText: compactText(latest.text || latest.label || latest.value || '暂无内容', 76),
+        summary: buildAnswerSummary(items),
+      }
+    })
+    .sort((a, b) => {
+      const aIndex = order.indexOf(a.questionId)
+      const bIndex = order.indexOf(b.questionId)
+      if (aIndex !== -1 || bIndex !== -1) {
+        return (aIndex === -1 ? 999 : aIndex) - (bIndex === -1 ? 999 : bIndex)
+      }
+      return b.latestTime - a.latestTime
+    })
+}
+
+function getQuestionCompletion(questionId) {
+  return stats.value.questionCompletion?.[questionId] || {
+    answered: 0,
+    total: stats.value.audienceTotal || audienceCount.value || 0,
+    rate: 0,
   }
 }
 
-function nextPageCmd() {
-  setShowState(currentPhase.value, currentPage.value + 1)
+function getMonologueReadiness(kind) {
+  const fallbackQuestions = monologueTypes.find(item => item.kind === kind)?.questions || []
+  if (!fallbackQuestions.length) {
+    return stats.value.monologueReadiness?.[kind] || {
+      questions: [],
+      details: [],
+      answered: 0,
+      total: 0,
+      rate: 100,
+      minRate: 100,
+      missingQuestions: [],
+    }
+  }
+
+  const fallbackDetails = fallbackQuestions.map(questionId => ({
+    questionId,
+    ...getQuestionCompletion(questionId),
+  }))
+  return stats.value.monologueReadiness?.[kind] || {
+    questions: fallbackQuestions,
+    details: fallbackDetails,
+    answered: fallbackDetails.reduce((sum, item) => sum + item.answered, 0),
+    total: (stats.value.audienceTotal || 0) * fallbackQuestions.length,
+    rate: 0,
+    minRate: fallbackDetails.length ? Math.min(...fallbackDetails.map(item => item.rate)) : 0,
+    missingQuestions: fallbackDetails.filter(item => item.rate === 0).map(item => item.questionId),
+  }
 }
 
-function triggerLLM() {
-  triggerLlm()
+function monologueReadinessLabel(kind) {
+  const readiness = getMonologueReadiness(kind)
+  if (!readiness.details.length) return '无需观众回答'
+  return `支持素材 ${readiness.rate}%`
+}
+
+function buildAnswerSummary(items) {
+  const counts = new Map()
+  items.forEach(answer => {
+    const label = compactText(answer.label || answer.value || answer.text || '未填写', 28)
+    counts.set(label, (counts.get(label) || 0) + 1)
+  })
+
+  const summary = [...counts.entries()]
+    .map(([label, count]) => ({ label, count }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, 'zh-CN'))
+
+  if (!summary.length) return [{ label: '暂无内容', count: 0 }]
+  if (summary.length > 6 && summary.every(item => item.count === 1)) {
+    return [{ label: `${summary.length} 条不同回答`, count: items.length }]
+  }
+  return summary.slice(0, 6)
+}
+
+function compactText(value, maxLength = 48) {
+  const text = String(value || '').replace(/\s+/g, ' ').trim()
+  if (text.length <= maxLength) return text
+  return `${text.slice(0, maxLength - 1)}…`
+}
+
+function formatAnswerTime(time) {
+  if (!time) return '--:--'
+  return new Date(time).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  })
+}
+
+function toggleAnswerGroup(key) {
+  expandedAnswerGroup.value = expandedAnswerGroup.value === key ? '' : key
+}
+
+function downloadAnswers(format) {
+  const safeFormat = format === 'json' ? 'json' : 'csv'
+  const url = new URL(`/api/export/answers.${safeFormat}`, window.location.origin)
+  const pin = getAdminPin()
+  if (pin) url.searchParams.set('pin', pin)
+  window.open(url.toString(), '_blank', 'noopener')
+}
+
+async function refreshMonologues() {
+  try {
+    const data = await fetchMonologues()
+    if (data.latest) latestMonologues.value = data.latest
+  } catch (error) {
+    monologueError.value = error.message
+  }
+}
+
+async function generateActorMonologue(kind) {
+  monologueBusy.value = kind
+  monologueError.value = ''
+  try {
+    const data = await generateMonologue(kind)
+    latestMonologues.value = {
+      ...latestMonologues.value,
+      [kind]: data.record || data,
+    }
+  } catch (error) {
+    monologueError.value = error.message
+  } finally {
+    monologueBusy.value = ''
+  }
 }
 
 function resetAll() {
@@ -185,10 +497,14 @@ function unlockAdmin() {
   adminUnlocked.value = true
   authError.value = ''
   connectBackend('admin')
+  refreshMonologues()
 }
 
 onMounted(() => {
-  if (adminUnlocked.value) connectBackend('admin')
+  if (adminUnlocked.value) {
+    connectBackend('admin')
+    refreshMonologues()
+  }
 
   removeStateListener = onBackendEvent('state', state => {
     currentPhase.value = state.phase || 'entry'
@@ -197,10 +513,14 @@ onMounted(() => {
 
   removeStatsListener = onBackendEvent('stats', data => {
     audienceCount.value = data.audienceCount || 0
+    stats.value.audienceTotal = data.audienceTotal || data.audienceCount || 0
     stats.value.totalSubmissions = data.totalSubmissions || 0
     stats.value.currentRoundSubmissions = data.currentRoundSubmissions || 0
     stats.value.completionRate = data.completionRate || 0
+    stats.value.questionCompletion = data.questionCompletion || {}
+    stats.value.monologueReadiness = data.monologueReadiness || {}
     if (data.answers) answers.value = data.answers
+    if (data.monologues) latestMonologues.value = data.monologues
   })
 
   removeErrorListener = onBackendEvent('error', data => {
@@ -220,7 +540,9 @@ onUnmounted(() => {
 
 <style scoped>
 .admin-login {
-  min-height: 100vh;
+  height: 100%;
+  min-height: 100%;
+  overflow-y: auto;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -278,11 +600,19 @@ onUnmounted(() => {
   color: #d87575;
 }
 
+.admin-error {
+  font-size: 12px;
+  color: #d87575;
+  margin-bottom: 10px;
+}
+
 .admin-panel {
-  min-height: 100vh;
+  height: 100%;
+  max-height: 100vh;
   background: #0f0f14;
   color: #e8e0d4;
   padding: 20px;
+  padding-bottom: calc(72px + env(safe-area-inset-bottom));
   font-family: "GenRyuMinTW", "Noto Serif CJK SC", "Noto Serif SC", "Source Han Serif SC", "Songti SC", "SimSun", serif;
   font-weight: 300;
   overflow-y: auto;
@@ -345,6 +675,17 @@ h2 {
   margin-bottom: 16px;
 }
 
+.control-group + .control-group {
+  margin-top: 14px;
+}
+
+.control-group-title {
+  margin-bottom: 8px;
+  color: rgba(232, 224, 212, 0.42);
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+
 .phase-badge {
   background: rgba(201, 169, 110, 0.12);
   border: 1px solid rgba(201, 169, 110, 0.3);
@@ -388,74 +729,106 @@ h2 {
   transform: scale(0.96);
 }
 
-.page-nav {
+.cue-buttons {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+}
+
+.cue-btn {
+  min-height: 58px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 10px 8px;
+  border: 1px solid rgba(201, 169, 110, 0.18);
+  border-radius: 8px;
+  background: rgba(201, 169, 110, 0.055);
+  color: rgba(232, 224, 212, 0.76);
+  font-family: inherit;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.cue-btn.active {
+  border-color: rgba(201, 169, 110, 0.56);
+  background: rgba(201, 169, 110, 0.14);
+  color: #f0c979;
+}
+
+.cue-btn:active {
+  transform: scale(0.97);
+}
+
+.cue-empty {
+  padding: 14px 12px;
+  border: 1px solid rgba(232, 224, 212, 0.08);
+  border-radius: 8px;
+  color: rgba(232, 224, 212, 0.34);
+  font-size: 12px;
+  text-align: left;
+}
+
+.cue-code {
+  color: #c9a96e;
+  font-size: 15px;
+  line-height: 1;
+  letter-spacing: 1px;
+}
+
+.cue-target {
+  color: rgba(232, 224, 212, 0.42);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.section-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  margin-bottom: 12px;
 }
 
-.nav-btn {
-  background: rgba(232, 224, 212, 0.04);
-  border: 1px solid rgba(232, 224, 212, 0.12);
-  color: #e8e0d4;
-  padding: 10px 18px;
+.section-title-row h2 {
+  margin-bottom: 0;
+}
+
+.answer-export-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.export-btn {
+  min-height: 30px;
+  padding: 6px 10px;
+  border: 1px solid rgba(201, 169, 110, 0.18);
   border-radius: 8px;
-  font-size: 13px;
-  cursor: pointer;
+  background: rgba(201, 169, 110, 0.055);
+  color: rgba(232, 224, 212, 0.68);
   font-family: inherit;
-  transition: all 0.2s;
-}
-
-.nav-btn:disabled {
-  opacity: 0.3;
-  pointer-events: none;
-}
-
-.nav-btn:active {
-  background: rgba(201, 169, 110, 0.1);
-}
-
-.page-indicator {
-  font-size: 14px;
-  color: rgba(232, 224, 212, 0.5);
-  letter-spacing: 1px;
-}
-
-.stats-grid {
-  display: grid;
-  grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
-}
-
-.stat-card {
-  background: rgba(232, 224, 212, 0.03);
-  border: 1px solid rgba(232, 224, 212, 0.08);
-  border-radius: 10px;
-  padding: 14px;
-  text-align: center;
-}
-
-.stat-value {
-  font-size: 22px;
-  font-weight: 500;
-  color: #c9a96e;
-  margin-bottom: 4px;
-}
-
-.stat-label {
   font-size: 11px;
-  color: rgba(232, 224, 212, 0.4);
-  letter-spacing: 1px;
+  cursor: pointer;
+}
+
+.export-btn:active {
+  border-color: rgba(201, 169, 110, 0.42);
+  color: #c9a96e;
 }
 
 .answer-tabs {
   display: flex;
   gap: 6px;
+  flex-wrap: wrap;
   margin-bottom: 12px;
 }
 
 .tab-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   background: transparent;
   border: 1px solid rgba(232, 224, 212, 0.1);
   color: rgba(232, 224, 212, 0.5);
@@ -472,12 +845,25 @@ h2 {
   color: #c9a96e;
 }
 
-.answer-list {
-  max-height: 200px;
-  overflow-y: auto;
-  border: 1px solid rgba(232, 224, 212, 0.06);
-  border-radius: 8px;
-  padding: 8px;
+.tab-count {
+  min-width: 22px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(232, 224, 212, 0.06);
+  color: rgba(232, 224, 212, 0.48);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.tab-btn.active .tab-count {
+  background: rgba(201, 169, 110, 0.16);
+  color: rgba(240, 201, 121, 0.86);
+}
+
+.answer-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
 .empty-state {
@@ -487,27 +873,291 @@ h2 {
   padding: 20px;
 }
 
-.answer-item {
+.answer-group {
+  border: 1px solid rgba(232, 224, 212, 0.08);
+  border-radius: 8px;
+  background: rgba(232, 224, 212, 0.025);
+  overflow: hidden;
+}
+
+.answer-group.expanded {
+  border-color: rgba(201, 169, 110, 0.22);
+  background: rgba(201, 169, 110, 0.035);
+}
+
+.answer-group-head {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-family: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.answer-group-head > span:first-child {
+  min-width: 0;
+}
+
+.answer-group-title-row {
   display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.answer-group-title {
+  display: block;
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(232, 224, 212, 0.88);
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.answer-rate-pill {
+  flex: 0 0 auto;
+  min-width: 42px;
+  padding: 2px 7px;
+  border: 1px solid rgba(201, 169, 110, 0.16);
+  border-radius: 999px;
+  background: rgba(201, 169, 110, 0.07);
+  color: rgba(240, 201, 121, 0.82);
+  font-size: 11px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.answer-group-meta {
+  display: block;
+  margin-top: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: rgba(232, 224, 212, 0.36);
+  font-size: 12px;
+  line-height: 1.3;
+}
+
+.answer-group-toggle {
+  flex: 0 0 auto;
+  min-width: 34px;
+  color: rgba(201, 169, 110, 0.7);
+  font-size: 12px;
+  text-align: right;
+}
+
+.completion-bar {
+  height: 2px;
+  margin: 0;
+  overflow: hidden;
+  background: rgba(232, 224, 212, 0.06);
+}
+
+.completion-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(201, 169, 110, 0.52), rgba(240, 201, 121, 0.9));
+  transition: width 0.24s ease;
+}
+
+.answer-group-body {
+  padding: 10px 12px 12px;
+  border-top: 1px solid rgba(232, 224, 212, 0.06);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.answer-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.summary-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 5px 8px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(232, 224, 212, 0.06);
+  color: rgba(232, 224, 212, 0.66);
+  font-size: 11px;
+  line-height: 1.2;
+}
+
+.summary-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary-chip strong {
+  color: #c9a96e;
+  font-weight: 500;
+}
+
+.answer-preview {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 8px;
+  padding-bottom: 10px;
+  color: rgba(232, 224, 212, 0.52);
+  font-size: 12px;
+}
+
+.answer-preview span {
+  color: rgba(201, 169, 110, 0.56);
+}
+
+.answer-preview p {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.answer-detail-list {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 0 -12px -12px;
+  border-top: 1px solid rgba(232, 224, 212, 0.06);
+  background: rgba(0, 0, 0, 0.12);
+}
+
+.answer-item {
+  display: grid;
+  grid-template-columns: minmax(72px, 0.3fr) minmax(0, 1fr) auto;
+  align-items: start;
   gap: 10px;
-  padding: 6px 8px;
+  padding: 8px 12px;
   border-bottom: 1px solid rgba(232, 224, 212, 0.04);
   font-size: 13px;
 }
 
+.answer-item:last-child {
+  border-bottom: 0;
+}
+
 .answer-room {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
   color: rgba(201, 169, 110, 0.6);
   white-space: nowrap;
-  min-width: 50px;
+  min-width: 72px;
+}
+
+.answer-session {
+  color: rgba(232, 224, 212, 0.28);
+  font-size: 10px;
+  letter-spacing: 0.5px;
 }
 
 .answer-text {
   color: rgba(232, 224, 212, 0.7);
+  overflow-wrap: anywhere;
+}
+
+.answer-time {
+  color: rgba(232, 224, 212, 0.28);
+  font-size: 11px;
+  white-space: nowrap;
 }
 
 .action-buttons {
   display: flex;
   gap: 10px;
+}
+
+.monologue-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+
+.monologue-action-main,
+.monologue-action-rate {
+  display: block;
+}
+
+.monologue-action-rate {
+  margin-top: 5px;
+  color: rgba(232, 224, 212, 0.42);
+  font-size: 11px;
+  letter-spacing: 0;
+}
+
+.monologue-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+}
+
+.monologue-card {
+  min-height: 160px;
+  padding: 12px;
+  border: 1px solid rgba(232, 224, 212, 0.08);
+  border-radius: 8px;
+  background: rgba(232, 224, 212, 0.03);
+}
+
+.monologue-title {
+  margin-bottom: 8px;
+  color: rgba(201, 169, 110, 0.74);
+  font-size: 12px;
+}
+
+.monologue-readiness {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  color: rgba(232, 224, 212, 0.42);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.monologue-question-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+
+.monologue-question-chip {
+  max-width: 100%;
+  padding: 4px 7px;
+  border: 1px solid rgba(232, 224, 212, 0.06);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.16);
+  color: rgba(232, 224, 212, 0.5);
+  font-size: 10px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.monologue-card p {
+  white-space: pre-wrap;
+  color: rgba(232, 224, 212, 0.76);
+  font-size: 13px;
+  line-height: 1.75;
 }
 
 .action-btn {
@@ -524,6 +1174,11 @@ h2 {
   transition: all 0.2s;
 }
 
+.action-btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
 .action-btn:active {
   background: rgba(201, 169, 110, 0.12);
 }
@@ -536,5 +1191,41 @@ h2 {
 
 .action-btn.danger:active {
   background: rgba(200, 60, 60, 0.1);
+}
+
+@media (max-width: 760px) {
+  .status-bar,
+  .current-state,
+  .section-title-row {
+    flex-wrap: wrap;
+  }
+
+  .answer-export-actions {
+    width: 100%;
+  }
+
+  .export-btn {
+    flex: 1;
+  }
+
+  .answer-item {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .answer-time {
+    grid-column: 2;
+  }
+
+  .phase-buttons,
+  .cue-buttons,
+  .monologue-actions,
+  .monologue-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .action-buttons {
+    align-items: stretch;
+    flex-direction: column;
+  }
 }
 </style>

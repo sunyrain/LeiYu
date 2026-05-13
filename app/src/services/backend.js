@@ -118,6 +118,10 @@ export function registerAudience(roomNumber) {
   })
 }
 
+export function clearAudienceRegistration() {
+  localStorage.removeItem(ROOM_KEY)
+}
+
 export function submitAnswerToBackend(answer) {
   sendMessage('audience:submit-answer', {
     sessionId: getSessionId(),
@@ -153,6 +157,31 @@ export async function generateMaterials(userContext) {
   if (!response.ok) throw new Error(`LLM API error: ${response.status}`)
   const data = await response.json()
   return data.materials
+}
+
+export async function generateMonologue(kind) {
+  const response = await fetch('/api/generate-monologue', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-admin-pin': getAdminPin(),
+    },
+    body: JSON.stringify({ kind }),
+  })
+
+  if (!response.ok) throw new Error(`Monologue API error: ${response.status}`)
+  return response.json()
+}
+
+export async function fetchMonologues() {
+  const response = await fetch('/api/monologues', {
+    headers: {
+      'x-admin-pin': getAdminPin(),
+    },
+  })
+
+  if (!response.ok) throw new Error(`Monologue API error: ${response.status}`)
+  return response.json()
 }
 
 function scheduleReconnect() {

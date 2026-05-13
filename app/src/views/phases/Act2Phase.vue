@@ -8,34 +8,31 @@
       >
         {{ line }}
       </p>
-      <p v-if="currentBlock.projection" class="projection">
-        {{ currentBlock.projection }}
-      </p>
     </template>
 
     <template v-else-if="gameState.currentPage === 5">
       <p>你跟着它们，</p>
       <p>再次看向手中的寻人启事。</p>
-      <p>你忽然想要____3____</p>
-      <div class="question-label">3.</div>
+      <p>你忽然想要____</p>
       <div class="choices">
         <button
           v-for="option in noticeOptions"
           :key="option.value"
           class="choice-btn"
           :class="{ selected: noticeChoice === option.value }"
-          @click="noticeChoice = option.value"
+          @click="selectNotice(option.value)"
         >
-          【{{ option.value }}】{{ option.label }}
+          {{ option.label }}
         </button>
       </div>
-      <button class="btn" :disabled="!noticeChoice" @click="submitNotice">确认</button>
+      <button class="btn" :disabled="!noticeChoice || noticeSubmitted" @click="submitNotice">
+        {{ noticeSubmitted ? '已确认' : '确认' }}
+      </button>
     </template>
 
     <template v-else-if="gameState.currentPage === 7">
       <p>而河水已经涨到你的脚边。</p>
-      <p>你不得不____4____</p>
-      <div class="question-label">4.</div>
+      <p>你不得不____</p>
       <div class="choices">
         <button
           v-for="option in riverOptions"
@@ -44,7 +41,7 @@
           :class="{ selected: riverChoice === option.value }"
           @click="riverChoice = option.value"
         >
-          【{{ option.value }}】{{ option.label }}
+          {{ option.label }}
         </button>
       </div>
       <button class="btn" :disabled="!riverChoice" @click="submitRiver">确认</button>
@@ -52,7 +49,7 @@
 
     <template v-else>
       <div class="waiting-state">
-        <p>请静静感受此刻。</p>
+        <p>请静静感受此刻</p>
         <p class="waiting-sub">等待剧情继续</p>
       </div>
     </template>
@@ -62,7 +59,6 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { gameState, setAnswer } from '../../stores/game.js'
-import { runChoiceOutro } from '../../utils/choiceOutro.js'
 
 const items = computed(() => {
   const raw = gameState.floodItem || ''
@@ -96,7 +92,6 @@ const currentBlock = computed(() => {
         '手心是湿的，',
         '纸张变得软。',
       ],
-      projection: '“你走吧。请你，再一次，离开吧。都走吧！而我攥着这张纸，不是要你回来，是我想要、选择站在这里。去，把窗户打开，我要站在所有灰暗的窗，把那天上拧结着电流的东西请进来。”',
     },
     4: {
       lines: [
@@ -110,14 +105,14 @@ const currentBlock = computed(() => {
         '你看见一个人跳进了那条河，',
         '还有一个从身边跑了过去。',
       ],
-      projection: '“水涨上来了，岸快不见了。我感到我正被溶解为一片一片的软弱。拆开这面墙，拆开这一切吧。就这一刻，我想要轻轻躺在水面上，散开或者流走。”',
     },
   }
   return blocks[gameState.currentPage]
 })
 
-const noticeChoice = ref('')
-const riverChoice = ref('')
+const noticeChoice = ref(gameState.noticeAction || '')
+const noticeSubmitted = ref(false)
+const riverChoice = ref(gameState.riverAction || '')
 
 const noticeOptions = [
   { value: 'A', label: '撕碎它' },
@@ -133,27 +128,22 @@ const riverOptions = [
   { value: 'D', label: '看着它' },
 ]
 
-async function submitNotice(event) {
+function selectNotice(value) {
+  noticeChoice.value = value
+  noticeSubmitted.value = false
+}
+
+function submitNotice() {
   if (!noticeChoice.value) return
   const option = noticeOptions.find(item => item.value === noticeChoice.value)
   setAnswer('noticeAction', noticeChoice.value, { label: option.label })
-  await runChoiceOutro({
-    event,
-    advance: () => {
-      gameState.currentPage = 6
-    },
-  })
+  noticeSubmitted.value = true
 }
 
-async function submitRiver(event) {
+function submitRiver() {
   if (!riverChoice.value) return
   const option = riverOptions.find(item => item.value === riverChoice.value)
   setAnswer('riverAction', riverChoice.value, { label: option.label })
-  await runChoiceOutro({
-    event,
-    advance: () => {
-      gameState.currentPage = 8
-    },
-  })
+  gameState.currentPage = 8
 }
 </script>

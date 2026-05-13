@@ -4,7 +4,7 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
-import { POEM_PROMPT, fallbackMaterials } from './prompt.js'
+import { MONOLOGUE3_FIXED_ENDING, MONOLOGUE_PROMPTS, POEM_PROMPT, fallbackMaterials, fallbackMonologue } from './prompt.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '..', '..')
@@ -13,6 +13,7 @@ const dataDir = path.join(projectRoot, 'data')
 const stateFile = path.join(dataDir, 'show-state.json')
 const answersFile = path.join(dataDir, 'answers.json')
 const materialsFile = path.join(dataDir, 'materials.json')
+const monologuesFile = path.join(dataDir, 'monologues.json')
 
 loadDotEnv(path.join(projectRoot, '.env'))
 loadDotEnv(path.join(projectRoot, 'server', '.env'))
@@ -25,6 +26,11 @@ const ADMIN_PIN = String(process.env.ADMIN_PIN || '')
 
 const phaseOrder = ['entry', 'prologue', 'act1', 'act2', 'act3', 'act4']
 const phaseToAnswerIndex = { act1: 0, act2: 1, act3: 2, act4: 3 }
+const monologueQuestionGroups = {
+  monologue1: ['lovedOneName'],
+  monologue2: [],
+  monologue3: ['roomBase'],
+}
 const WS_OPEN = 1
 
 let showState = {
@@ -37,6 +43,7 @@ let showState = {
 const sessions = new Map()
 let answers = []
 let generatedMaterials = []
+let generatedMonologues = []
 
 await ensureData()
 await loadPersistedData()
@@ -138,6 +145,7 @@ async function loadPersistedData() {
   showState = await readJson(stateFile, showState)
   answers = await readJson(answersFile, [])
   generatedMaterials = await readJson(materialsFile, [])
+  generatedMonologues = await readJson(monologuesFile, [])
 }
 
 async function readJson(file, fallback) {
@@ -156,6 +164,7 @@ function persistStateSoon() {
       writeJson(stateFile, showState),
       writeJson(answersFile, answers),
       writeJson(materialsFile, generatedMaterials),
+      writeJson(monologuesFile, generatedMonologues),
     ])
   }, 100)
 }
@@ -191,6 +200,12 @@ async function handleApi(req, res) {
     return
   }
 
+  if (req.method === 'GET' && url.pathname === '/api/monologues') {
+    if (!isAdminHttpAuthorized(req, url)) return sendJson(res, 401, { error: 'unauthorized' })
+    sendJson(res, 200, { monologues: generatedMonologues, latest: latestMonologuesByKind() })
+    return
+  }
+
   if (req.method === 'GET' && url.pathname === '/api/export/answers.json') {
     if (!isAdminHttpAuthorized(req, url)) return sendJson(res, 401, { error: 'unauthorized' })
     sendDownload(res, 'answers.json', 'application/json; charset=utf-8', JSON.stringify(answers, null, 2))
@@ -200,6 +215,12 @@ async function handleApi(req, res) {
   if (req.method === 'GET' && url.pathname === '/api/export/answers.csv') {
     if (!isAdminHttpAuthorized(req, url)) return sendJson(res, 401, { error: 'unauthorized' })
     sendDownload(res, 'answers.csv', 'text/csv; charset=utf-8', toCsv(answers))
+    return
+  }
+
+  if (req.method === 'GET' && url.pathname === '/api/export/monologues.json') {
+    if (!isAdminHttpAuthorized(req, url)) return sendJson(res, 401, { error: 'unauthorized' })
+    sendDownload(res, 'monologues.json', 'application/json; charset=utf-8', JSON.stringify(generatedMonologues, null, 2))
     return
   }
 
@@ -225,6 +246,27 @@ async function handleApi(req, res) {
     generatedMaterials.push(record)
     persistStateSoon()
     sendJson(res, 200, result)
+    return
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/generate-monologue') {
+    if (!isAdminHttpAuthorized(req, url)) return sendJson(res, 401, { error: 'unauthorized' })
+    const body = await readBody(req)
+    const result = await generateMonologue(body.kind || body.type || 'monologue1')
+    const record = {
+      id: makeId('mono'),
+      kind: result.kind,
+      label: result.label,
+      text: result.text,
+      fallback: result.fallback,
+      error: result.error || '',
+      sourceCount: result.sourceCount || 0,
+      createdAt: Date.now(),
+    }
+    generatedMonologues.push(record)
+    persistStateSoon()
+    broadcastStats()
+    sendJson(res, 200, { ...result, record })
     return
   }
 
@@ -261,27 +303,15 @@ async function generateMaterials(userContext) {
   const timeout = setTimeout(() => controller.abort(), 12000)
 
   try {
-    const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
-      },
-      body: JSON.stringify({
-        model: DEEPSEEK_MODEL,
-        messages: [
-          { role: 'system', content: POEM_PROMPT },
-          { role: 'user', content: userMessage },
-        ],
-        temperature: 0.9,
-        max_tokens: 1024,
-      }),
+    const text = await requestChatText({
+      messages: [
+        { role: 'system', content: POEM_PROMPT },
+        { role: 'user', content: userMessage },
+      ],
+      temperature: 0.9,
+      maxTokens: 1024,
       signal: controller.signal,
     })
-
-    if (!response.ok) throw new Error(`DeepSeek API error: ${response.status}`)
-    const data = await response.json()
-    const text = String(data.choices?.[0]?.message?.content || '').trim()
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (!jsonMatch) throw new Error('No JSON found in response')
 
@@ -291,6 +321,197 @@ async function generateMaterials(userContext) {
   } finally {
     clearTimeout(timeout)
   }
+}
+
+async function generateMonologue(kind) {
+  const prompt = MONOLOGUE_PROMPTS[kind]
+  if (!prompt) throw new Error(`Unknown monologue kind: ${kind}`)
+
+  const sourceAnswers = answersForMonologue(kind)
+  const userInput = formatAnswersForPrompt(sourceAnswers)
+
+  if (kind === 'monologue1') {
+    return {
+      kind,
+      label: prompt.label,
+      text: buildNameCallMonologue(sourceAnswers),
+      fallback: false,
+      sourceCount: sourceAnswers.length,
+    }
+  }
+
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return {
+      kind,
+      label: prompt.label,
+      text: postProcessMonologue(kind, fallbackMonologue(kind, userInput), sourceAnswers),
+      fallback: true,
+      error: 'missing_api_key',
+      sourceCount: sourceAnswers.length,
+    }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 18000)
+
+  try {
+    const text = await requestChatText({
+      messages: [
+        { role: 'system', content: prompt.system },
+        { role: 'user', content: prompt.user(userInput) },
+      ],
+      temperature: kind === 'monologue2' ? 1 : 0.86,
+      maxTokens: kind === 'monologue2' ? 420 : 900,
+      signal: controller.signal,
+    })
+    return {
+      kind,
+      label: prompt.label,
+      text: postProcessMonologue(kind, text, sourceAnswers),
+      fallback: false,
+      sourceCount: sourceAnswers.length,
+    }
+  } catch (error) {
+    return {
+      kind,
+      label: prompt.label,
+      text: postProcessMonologue(kind, fallbackMonologue(kind, userInput), sourceAnswers),
+      fallback: true,
+      error: error.message,
+      sourceCount: sourceAnswers.length,
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+function postProcessMonologue(kind, text, sourceAnswers) {
+  if (kind === 'monologue1') return buildNameCallMonologue(sourceAnswers)
+  if (kind === 'monologue3') return enforceMonologue3Ending(text)
+  return cleanMonologueText(text)
+}
+
+function buildNameCallMonologue(sourceAnswers) {
+  const names = extractAudienceNames(sourceAnswers)
+  const fallbackNames = ['那个名字', '旧日的人', '门外的人', '你']
+  const selected = []
+  const seen = new Set()
+
+  for (const name of [...names, ...fallbackNames]) {
+    const key = name.toLocaleLowerCase('zh-CN')
+    if (seen.has(key)) continue
+    seen.add(key)
+    selected.push(name)
+    if (selected.length >= 4) break
+  }
+
+  const [first, second, third, fourth] = selected
+  return `${first}，回来吧……${second}，这次算我求你。你在哪儿？回来，好吗？${third}，${fourth}……`
+}
+
+function extractAudienceNames(sourceAnswers) {
+  const invalidNames = new Set(['无', '没有', '暂无', '未填写', '不知道', '不想说', '匿名', '无名', 'none', 'null'])
+  const names = []
+  const seen = new Set()
+
+  for (const answer of [...sourceAnswers].reverse()) {
+    const raw = String(answer.text || answer.label || answer.value || '')
+    const candidates = raw.split(/[、,，;；/|｜\n\r]+/)
+    for (const candidate of candidates) {
+      const name = cleanAudienceName(candidate)
+      if (!name || invalidNames.has(name.toLocaleLowerCase('zh-CN'))) continue
+      const key = name.toLocaleLowerCase('zh-CN')
+      if (seen.has(key)) continue
+      seen.add(key)
+      names.push(name)
+    }
+  }
+
+  return names
+}
+
+function cleanAudienceName(value) {
+  const name = String(value || '')
+    .replace(/^[-*\s]+/, '')
+    .replace(/^[^:：]*[:：]\s*/, '')
+    .replace(/[“”"「」『』《》[\]()（）]/g, '')
+    .replace(/\s+/g, '')
+    .replace(/[。.!！?？…]+$/g, '')
+    .trim()
+
+  if (!name || name.includes('_')) return ''
+  if (name.length > 12) return ''
+  if (/^(未|没|无|不)/.test(name) && name.length <= 4) return ''
+  return name
+}
+
+function enforceMonologue3Ending(text) {
+  let prefix = cleanMonologueText(text)
+  const endingMarkers = [
+    '我没告诉ta雨没停',
+    '我没告诉他雨没停',
+    '我没告诉她雨没停',
+    '但我们都应该收拾出来一件自己的房间',
+  ]
+  const markerIndex = endingMarkers
+    .map(marker => prefix.indexOf(marker))
+    .filter(index => index >= 0)
+    .sort((a, b) => a - b)[0]
+
+  if (markerIndex !== undefined) prefix = prefix.slice(0, markerIndex)
+  prefix = prefix.replace(/[“”"「」『』\s]+$/g, '').trim()
+  if (prefix && !/[。！？…]$/.test(prefix)) prefix += '。'
+  return `${prefix}${MONOLOGUE3_FIXED_ENDING}`
+}
+
+function cleanMonologueText(text) {
+  return String(text || '')
+    .replace(/^```[a-zA-Z]*\s*/, '')
+    .replace(/```$/g, '')
+    .replace(/^[“”"「」『』]+|[“”"「」『』]+$/g, '')
+    .trim()
+}
+
+async function requestChatText({ messages, temperature, maxTokens, signal }) {
+  const response = await fetch(`${DEEPSEEK_BASE_URL}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: DEEPSEEK_MODEL,
+      messages,
+      temperature,
+      max_tokens: maxTokens,
+    }),
+    signal,
+  })
+
+  if (!response.ok) throw new Error(`DeepSeek API error: ${response.status}`)
+  const data = await response.json()
+  const text = String(data.choices?.[0]?.message?.content || '').trim()
+  if (!text) throw new Error('Empty LLM response')
+  return text
+}
+
+function answersForMonologue(kind) {
+  const allowed = new Set(monologueQuestionGroups[kind] || [])
+  return answers
+    .filter(answer => allowed.has(answer.questionId))
+    .slice(-80)
+}
+
+function formatAnswersForPrompt(sourceAnswers) {
+  if (!sourceAnswers.length) return '暂无观众提交。'
+  return sourceAnswers
+    .map(answer => {
+      const room = answer.roomNumber ? `${answer.roomNumber}号` : '未知房间'
+      const label = answer.label || answer.value || ''
+      const text = answer.text || label
+      return `- ${room} / ${answer.questionId}: ${text}`
+    })
+    .join('\n')
 }
 
 function handleWsMessage(ws, message) {
@@ -347,7 +568,7 @@ function handleWsMessage(ws, message) {
     const answer = normalizeAnswer({ ...payload, remoteAddress: ws.meta.remoteAddress })
     if (!answer.sessionId && ws.meta.sessionId) answer.sessionId = ws.meta.sessionId
     if (!answer.roomNumber && ws.meta.roomNumber) answer.roomNumber = ws.meta.roomNumber
-    answers.push(answer)
+    upsertAnswer(answer)
     if (answer.sessionId) {
       upsertSession({
         sessionId: answer.sessionId,
@@ -379,6 +600,26 @@ function handleWsMessage(ws, message) {
   }
 
   sendWs(ws, 'server:error', { code: 'unknown_type', message: type })
+}
+
+function upsertAnswer(answer) {
+  if (!answer.questionId) {
+    answers.push(answer)
+    return
+  }
+
+  const matchesSameAnswer = current => {
+    if (answer.sessionId && current.sessionId) {
+      return current.sessionId === answer.sessionId && current.questionId === answer.questionId
+    }
+    if (answer.roomNumber && current.roomNumber) {
+      return current.roomNumber === answer.roomNumber && current.questionId === answer.questionId
+    }
+    return false
+  }
+
+  answers = answers.filter(current => !matchesSameAnswer(current))
+  answers.push(answer)
 }
 
 function isAdminPinValid(value) {
@@ -449,6 +690,7 @@ function resetShow() {
   }
   answers = []
   generatedMaterials = []
+  generatedMonologues = []
   sessions.clear()
   persistStateSoon()
   broadcast('server:reset', { state: showState })
@@ -458,6 +700,7 @@ function resetShow() {
 
 function buildStats() {
   const connectedAudience = [...sessions.values()].filter(s => s.connected)
+  const audienceTotal = getAudienceTotal()
   const perPhase = { act1: 0, act2: 0, act3: 0, act4: 0 }
   const groupedAnswers = [[], [], [], []]
 
@@ -467,6 +710,8 @@ function buildStats() {
     if (index !== undefined) {
       groupedAnswers[index].push({
         room: answer.roomNumber || '未知',
+        sessionId: answer.sessionId || '',
+        sessionCode: getSessionCode(answer.sessionId),
         text: answer.text || answer.label || answer.value,
         questionId: answer.questionId,
         label: answer.label,
@@ -483,14 +728,98 @@ function buildStats() {
 
   return {
     audienceCount,
+    audienceTotal,
     totalSubmissions: answers.length,
     currentRoundSubmissions: perPhase[showState.phase] || 0,
-    completionRate: audienceCount ? Math.round((completedSessions.size / audienceCount) * 100) : 0,
+    completionRate: audienceTotal ? Math.round((completedSessions.size / audienceTotal) * 100) : 0,
     perPhase,
     answers: groupedAnswers,
+    questionCompletion: buildQuestionCompletion(audienceTotal),
+    monologueReadiness: buildMonologueReadiness(audienceTotal),
     generatedCount: generatedMaterials.length,
+    monologueCount: generatedMonologues.length,
+    monologues: latestMonologuesByKind(),
     updatedAt: Date.now(),
   }
+}
+
+function getAudienceTotal() {
+  const knownSessions = new Set()
+  for (const session of sessions.values()) {
+    if (session.sessionId && (session.roomNumber || session.connected)) knownSessions.add(session.sessionId)
+  }
+  for (const answer of answers) {
+    if (answer.sessionId) knownSessions.add(answer.sessionId)
+    else if (answer.roomNumber) knownSessions.add(`room:${answer.roomNumber}`)
+  }
+  return knownSessions.size
+}
+
+function buildQuestionCompletion(audienceTotal) {
+  const byQuestion = new Map()
+  for (const answer of answers) {
+    if (!answer.questionId) continue
+    if (!byQuestion.has(answer.questionId)) byQuestion.set(answer.questionId, new Set())
+    byQuestion.get(answer.questionId).add(answer.sessionId || `room:${answer.roomNumber || answer.id}`)
+  }
+
+  const result = {}
+  for (const [questionId, users] of byQuestion.entries()) {
+    result[questionId] = {
+      answered: users.size,
+      total: audienceTotal,
+      rate: audienceTotal ? Math.round((users.size / audienceTotal) * 100) : 0,
+    }
+  }
+  return result
+}
+
+function buildMonologueReadiness(audienceTotal) {
+  const questionCompletion = buildQuestionCompletion(audienceTotal)
+  return Object.entries(monologueQuestionGroups).reduce((result, [kind, questions]) => {
+    if (!questions.length) {
+      result[kind] = {
+        questions,
+        details: [],
+        answered: 0,
+        total: 0,
+        rate: 100,
+        minRate: 100,
+        missingQuestions: [],
+      }
+      return result
+    }
+
+    const details = questions.map(questionId => ({
+      questionId,
+      ...(questionCompletion[questionId] || { answered: 0, total: audienceTotal, rate: 0 }),
+    }))
+    const answeredTotal = details.reduce((sum, item) => sum + item.answered, 0)
+    const requiredTotal = audienceTotal * questions.length
+    result[kind] = {
+      questions,
+      details,
+      answered: answeredTotal,
+      total: requiredTotal,
+      rate: requiredTotal ? Math.round((answeredTotal / requiredTotal) * 100) : 0,
+      minRate: details.length ? Math.min(...details.map(item => item.rate)) : 0,
+      missingQuestions: details.filter(item => item.rate === 0).map(item => item.questionId),
+    }
+    return result
+  }, {})
+}
+
+function getSessionCode(sessionId) {
+  const value = String(sessionId || '')
+  if (!value) return ''
+  return value.slice(-6).toUpperCase()
+}
+
+function latestMonologuesByKind() {
+  return ['monologue1', 'monologue2', 'monologue3'].reduce((result, kind) => {
+    result[kind] = [...generatedMonologues].reverse().find(item => item.kind === kind) || null
+    return result
+  }, {})
 }
 
 function broadcastStats() {

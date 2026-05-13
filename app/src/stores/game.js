@@ -1,26 +1,50 @@
 import { reactive } from 'vue'
 import {
+  clearAudienceRegistration,
   connectBackend,
+  getRoomNumber,
   onBackendEvent,
   registerAudience,
   submitAnswerToBackend,
 } from '../services/backend.js'
 
+const LOCAL_GAME_KEY = 'fy_game_state'
+const localAnswerKeys = [
+  'roomNumber',
+  'floodItem',
+  'lovedOneName',
+  'departureAction',
+  'reunionAction',
+  'noticeAction',
+  'riverAction',
+  'roomBase',
+  'roomPoemParts',
+  'identity',
+  'mirrorSelf',
+  'finalTransform',
+  'objectAction',
+  'finalAction',
+  'poemMaterials',
+]
+
+const savedLocalGame = readLocalGameState()
+
 export const gameState = reactive({
-  roomNumber: '',
-  floodItem: '',
-  lovedOneName: '',
-  departureAction: '',
-  reunionAction: '',
-  noticeAction: '',
-  riverAction: '',
-  roomBase: '',
-  identity: '',
-  mirrorSelf: '',
-  finalTransform: '',
-  objectAction: '',
-  finalAction: '',
-  poemMaterials: '',
+  roomNumber: savedLocalGame.roomNumber || getRoomNumber(),
+  floodItem: savedLocalGame.floodItem || '',
+  lovedOneName: savedLocalGame.lovedOneName || '',
+  departureAction: savedLocalGame.departureAction || '',
+  reunionAction: savedLocalGame.reunionAction || '',
+  noticeAction: savedLocalGame.noticeAction || '',
+  riverAction: savedLocalGame.riverAction || '',
+  roomBase: savedLocalGame.roomBase || '',
+  roomPoemParts: savedLocalGame.roomPoemParts || '',
+  identity: savedLocalGame.identity || '',
+  mirrorSelf: savedLocalGame.mirrorSelf || '',
+  finalTransform: savedLocalGame.finalTransform || '',
+  objectAction: savedLocalGame.objectAction || '',
+  finalAction: savedLocalGame.finalAction || '',
+  poemMaterials: savedLocalGame.poemMaterials || '',
   currentPhase: 'entry',
   currentPage: 0,
 })
@@ -103,6 +127,7 @@ const answerMeta = {
 
 export function setAnswer(key, value, details = {}) {
   gameState[key] = value
+  persistLocalGameState()
 
   if (key === 'roomNumber') {
     registerAudience(value)
@@ -128,6 +153,10 @@ export function nextPage() {
   gameState.currentPage++
 }
 
+export function previousPage() {
+  gameState.currentPage = Math.max(0, gameState.currentPage - 1)
+}
+
 export function goToPhase(phase) {
   gameState.currentPhase = phase
   gameState.currentPage = 0
@@ -138,6 +167,7 @@ export function initAudienceBackend() {
   audienceBackendStarted = true
 
   connectBackend('audience')
+  if (gameState.roomNumber) registerAudience(gameState.roomNumber)
 
   onBackendEvent('state', state => {
     if (!state || state.updatedAt === lastRemoteStateAt) return
@@ -164,6 +194,8 @@ export function initAudienceBackend() {
 }
 
 function resetLocalGame() {
+  clearLocalGameState()
+  clearAudienceRegistration()
   gameState.roomNumber = ''
   gameState.floodItem = ''
   gameState.lovedOneName = ''
@@ -172,6 +204,7 @@ function resetLocalGame() {
   gameState.noticeAction = ''
   gameState.riverAction = ''
   gameState.roomBase = ''
+  gameState.roomPoemParts = ''
   gameState.identity = ''
   gameState.mirrorSelf = ''
   gameState.finalTransform = ''
@@ -181,6 +214,30 @@ function resetLocalGame() {
   gameState.currentPhase = 'entry'
   gameState.currentPage = 0
   firstRemoteStateApplied = false
+}
+
+function readLocalGameState() {
+  if (typeof localStorage === 'undefined') return {}
+  try {
+    const parsed = JSON.parse(localStorage.getItem(LOCAL_GAME_KEY) || '{}')
+    return parsed && typeof parsed === 'object' ? parsed : {}
+  } catch {
+    return {}
+  }
+}
+
+function persistLocalGameState() {
+  if (typeof localStorage === 'undefined') return
+  const snapshot = {}
+  localAnswerKeys.forEach(key => {
+    snapshot[key] = String(gameState[key] || '')
+  })
+  localStorage.setItem(LOCAL_GAME_KEY, JSON.stringify(snapshot))
+}
+
+function clearLocalGameState() {
+  if (typeof localStorage === 'undefined') return
+  localStorage.removeItem(LOCAL_GAME_KEY)
 }
 
 function buildAnswerText(key, value, label) {

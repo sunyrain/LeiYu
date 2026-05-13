@@ -23,18 +23,22 @@ preview_exports/
 draft.md
 docs/background-prompts.md
 start-demo-public.ps1
+~$*
 
 # Local design references kept out of the public release
 *.ai
 *.pdf
+*.docx
+蘩漪2026-全部界面底图/
 928795898baf0aafd41f5b787171d6cf.jpg
 ChatGPT Image 2026年4月28日 19_41_16.png
 image.png
 
-# Unused/source-size visual assets. The app uses the .webp backgrounds.
+# Unused/source-size visual assets. The app uses the compressed page JPGs.
 app/src/assets/hero.png
 app/src/assets/vite.svg
 app/public/bg.png
 app/public/icons.svg
 app/public/stage-bg-thunderfire.png
 app/public/backgrounds/*.png
+app/public/backgrounds/*.webp

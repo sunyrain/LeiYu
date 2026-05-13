@@ -1,10 +1,8 @@
 <template>
   <div
     class="story"
-    :class="phaseClass"
+    :class="[phaseClass, { 'is-bg-empty': !activeStageBg }]"
     @click="handleClick"
-    @touchmove.passive="onTouchMove"
-    @mousemove="onMouseMove"
   >
     <div
       v-if="previousStageBg"
@@ -12,11 +10,31 @@
       :style="{ backgroundImage: `url('${previousStageBg}')` }"
     ></div>
     <div
+      v-if="activeStageBg"
       class="stage-bg stage-bg-current"
       :class="{ 'is-fading-in': isStageFading }"
       :style="{ backgroundImage: `url('${activeStageBg}')` }"
     ></div>
-    <canvas ref="ambientCanvas" class="ambient-canvas"></canvas>
+    <div class="story-hud">
+      <div class="story-progress" aria-live="polite">
+        <div class="story-progress-meta">
+          <span>{{ phaseLabels[gameState.currentPhase] }} {{ currentPhasePage }} / {{ currentPhaseTotal }}</span>
+          <span>总页码 {{ currentTotalPage }} / {{ totalPageCount }}</span>
+        </div>
+        <div class="phase-progress-track" aria-hidden="true">
+          <div class="phase-progress-fill" :style="{ width: `${phaseProgressPercent}%` }"></div>
+        </div>
+      </div>
+    </div>
+    <button
+      v-if="showBackButton"
+      type="button"
+      class="story-back"
+      aria-label="返回上一页"
+      @click.stop="goBack"
+    >
+      返回
+    </button>
     <Transition
       @before-leave="onBeforeLeave"
       @leave="onLeave"
@@ -27,14 +45,13 @@
     >
       <component :is="currentComponent" :key="gameState.currentPhase + '-' + gameState.currentPage" />
     </Transition>
-    <div ref="glyphLayer" class="glyph-layer"></div>
-    <div v-if="showTapHint && !isScattering" class="tap-hint">轻触继续</div>
+    <div v-if="showTapHint && !isPageTransitioning" class="tap-hint">轻触继续</div>
   </div>
 </template>
 
 <script setup>
 import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
-import { gameState, nextPage } from '../stores/game.js'
+import { gameState, nextPage, previousPage } from '../stores/game.js'
 import EntryPhase from './phases/EntryPhase.vue'
 import ProloguePhase from './phases/ProloguePhase.vue'
 import Act1Phase from './phases/Act1Phase.vue'
@@ -53,30 +70,119 @@ const phaseComponents = {
 
 const currentComponent = computed(() => phaseComponents[gameState.currentPhase])
 
-const phaseBackgrounds = {
-  entry: '/backgrounds/entry-threshold.webp',
-  prologue: '/backgrounds/prologue-notice.webp',
-  act1: '/backgrounds/act1-flood-memory.webp',
-  act2: '/backgrounds/act2-thunderfire.webp',
-  act3: '/backgrounds/act3-room-rebuild.webp',
-  act4: '/backgrounds/act4-afterstorm.webp',
+const phaseLabels = {
+  entry: '进场',
+  prologue: '序章',
+  act1: '交互一',
+  act2: '交互二',
+  act3: '交互三',
+  act4: '交互四',
 }
 
-const activeStageBg = ref(phaseBackgrounds[gameState.currentPhase] || phaseBackgrounds.entry)
+const phaseOrder = ['entry', 'prologue', 'act1', 'act2', 'act3', 'act4']
+const phasePageCounts = {
+  entry: 3,
+  prologue: 1,
+  act1: 14,
+  act2: 9,
+  act3: 9,
+  act4: 7,
+}
+
+const totalPageCount = Object.values(phasePageCounts).reduce((sum, count) => sum + count, 0)
+
+const currentPhaseTotal = computed(() => phasePageCounts[gameState.currentPhase] || 1)
+const currentPhasePage = computed(() => clampPage(gameState.currentPage + 1, currentPhaseTotal.value))
+const currentTotalPage = computed(() => {
+  const offset = phaseOrder
+    .slice(0, Math.max(0, phaseOrder.indexOf(gameState.currentPhase)))
+    .reduce((sum, phase) => sum + (phasePageCounts[phase] || 0), 0)
+  return clampPage(offset + currentPhasePage.value, totalPageCount)
+})
+const phaseProgressPercent = computed(() => {
+  return Math.round((currentPhasePage.value / currentPhaseTotal.value) * 100)
+})
+const showBackButton = computed(() => gameState.currentPage > 0)
+const canGoBack = computed(() => showBackButton.value && !isPageTransitioning.value)
+
+function clampPage(page, total) {
+  return Math.min(Math.max(page, 1), Math.max(total, 1))
+}
+
+const backgroundVersion = '20260512-cover'
+
+const pageBackgrounds = {
+  entry: [
+    pageBackgroundPath('entry-cover'),
+    pageBackgroundPath('entry-0'),
+    pageBackgroundPath('entry-1'),
+  ],
+  prologue: [
+    pageBackgroundPath('prologue-0'),
+  ],
+  act1: pageBackgroundRange('act1', 14),
+  act2: pageBackgroundRange('act2', 9),
+  act3: pageBackgroundRange('act3', 9),
+  act4: [
+    ...pageBackgroundRange('act4', 6),
+    '',
+  ],
+}
+
+function pageBackgroundPath(name) {
+  return `/backgrounds/pages/${name}.jpg?v=${backgroundVersion}`
+}
+
+function pageBackgroundRange(prefix, count) {
+  return Array.from({ length: count }, (_, index) => pageBackgroundPath(`${prefix}-${index}`))
+}
+
+function getStageBackground(phase = gameState.currentPhase, page = gameState.currentPage) {
+  const backgrounds = pageBackgrounds[phase]
+  if (!backgrounds) return ''
+  if (backgrounds[page] !== undefined) return backgrounds[page]
+  return backgrounds[Math.max(0, backgrounds.length - 1)] || ''
+}
+
+const activeStageBg = ref(getStageBackground())
 const previousStageBg = ref('')
 const isStageFading = ref(false)
 let stageFadeTimer = null
 
-const preloadedBackgrounds = []
+const preloadedBackgrounds = new Map()
 
 function preloadStageBackgrounds() {
-  if (typeof Image === 'undefined' || preloadedBackgrounds.length > 0) return
-  Object.values(phaseBackgrounds).forEach(src => {
-    const img = new Image()
-    img.decoding = 'async'
-    img.src = src
-    preloadedBackgrounds.push(img)
-  })
+  preloadNearbyBackgrounds()
+}
+
+function preloadNearbyBackgrounds(phase = gameState.currentPhase, page = gameState.currentPage) {
+  preloadStageBackground(getStageBackground(phase, page))
+  const nextPosition = getNextStagePosition(phase, page)
+  if (nextPosition) {
+    preloadStageBackground(getStageBackground(nextPosition.phase, nextPosition.page))
+  }
+}
+
+function getNextStagePosition(phase, page) {
+  const phaseTotal = phasePageCounts[phase] || 0
+  if (page + 1 < phaseTotal) return { phase, page: page + 1 }
+
+  const nextPhase = phaseOrder[phaseOrder.indexOf(phase) + 1]
+  if (!nextPhase) return null
+  return { phase: nextPhase, page: 0 }
+}
+
+function preloadStageBackground(src) {
+  if (!src || typeof Image === 'undefined' || preloadedBackgrounds.has(src)) return
+  const img = new Image()
+  img.decoding = 'async'
+  img.src = src
+  preloadedBackgrounds.set(src, img)
+
+  if (preloadedBackgrounds.size > 8) {
+    const oldestSrc = preloadedBackgrounds.keys().next().value
+    preloadedBackgrounds.delete(oldestSrc)
+  }
 }
 
 const phaseIntensity = {
@@ -91,9 +197,9 @@ const phaseIntensity = {
 const phaseClass = computed(() => `phase-${phaseIntensity[gameState.currentPhase] || 'quiet'}`)
 
 watch(
-  () => gameState.currentPhase,
-  async phase => {
-    const nextBg = phaseBackgrounds[phase] || phaseBackgrounds.entry
+  () => [gameState.currentPhase, gameState.currentPage],
+  async ([phase, page]) => {
+    const nextBg = getStageBackground(phase, page)
     if (nextBg === activeStageBg.value) return
 
     if (stageFadeTimer) clearTimeout(stageFadeTimer)
@@ -105,6 +211,7 @@ watch(
     requestAnimationFrame(() => {
       isStageFading.value = true
     })
+    preloadNearbyBackgrounds(phase, page)
 
     stageFadeTimer = setTimeout(() => {
       previousStageBg.value = ''
@@ -115,7 +222,7 @@ watch(
 )
 
 const interactivePages = {
-  entry: [0, 1],
+  entry: [1, 2],
   prologue: [],
   act1: [4, 9, 10, 11],
   act2: [5, 7],
@@ -127,15 +234,15 @@ const terminalPages = {
   act4: 6,
 }
 
-const waitingPages = {
-  prologue: 9,
-  act1: 13,
-  act2: 8,
-  act3: 8,
+const controlledPausePages = {
+  prologue: [0],
+  act1: [5, 6, 13],
+  act2: [3, 5, 8],
+  act3: [3, 8],
 }
 
-const isScattering = ref(false)
-let skipLeaveScatter = false
+const isPageTransitioning = ref(false)
+let pageTransitionId = 0
 
 const isTerminalPage = computed(() => {
   const terminalPage = terminalPages[gameState.currentPhase]
@@ -143,8 +250,9 @@ const isTerminalPage = computed(() => {
 })
 
 const isWaitingPage = computed(() => {
-  const waitingPage = waitingPages[gameState.currentPhase]
-  return waitingPage !== undefined && gameState.currentPage >= waitingPage
+  const pages = controlledPausePages[gameState.currentPhase] || []
+  const lastPage = Math.max((phasePageCounts[gameState.currentPhase] || 1) - 1, 0)
+  return pages.includes(gameState.currentPage) || (gameState.currentPage >= lastPage && pages.includes(lastPage))
 })
 
 const showTapHint = computed(() => {
@@ -154,224 +262,28 @@ const showTapHint = computed(() => {
   return !pages.includes(gameState.currentPage)
 })
 
-// ── glyph DOM layer ──────────────────────────────────────────────
-const glyphLayer = ref(null)
-let glyphEls = []
-let rafId = null
-
-function collectGlyphs(el) {
-  const layer = glyphLayer.value
-  if (!layer) return
-  layer.innerHTML = ''
-  glyphEls = []
-
-  const textEls = el.querySelectorAll('p')
-  textEls.forEach(textEl => {
-    const text = textEl.textContent || ''
-    if (!text.trim()) return
-
-    const style = window.getComputedStyle(textEl)
-    const fontSize = parseFloat(style.fontSize)
-
-    const walker = document.createTreeWalker(textEl, NodeFilter.SHOW_TEXT)
-    let textNode
-    while ((textNode = walker.nextNode())) {
-      const nodeText = textNode.textContent || ''
-      for (let i = 0; i < nodeText.length; i++) {
-        if (!nodeText[i].trim()) continue
-        const range = document.createRange()
-        try {
-          range.setStart(textNode, i)
-          range.setEnd(textNode, i + 1)
-        } catch { continue }
-        const rect = range.getBoundingClientRect()
-        if (rect.width === 0 && rect.height === 0) continue
-
-        const parentEl = textNode.parentElement
-        const charStyle = parentEl ? window.getComputedStyle(parentEl) : style
-        const charFont = `${charStyle.fontStyle} ${charStyle.fontWeight} ${parseFloat(charStyle.fontSize)}px ${charStyle.fontFamily}`
-        const charLineHeight = charStyle.lineHeight === 'normal' ? `${rect.height}px` : charStyle.lineHeight
-        const charLetterSpacing = charStyle.letterSpacing === 'normal' ? '0px' : charStyle.letterSpacing
-
-        // Assign a warm color palette per character
-        const hue = 30 + Math.random() * 20  // gold range 30-50
-        const sat = 40 + Math.random() * 30  // 40-70%
-        const lit = 65 + Math.random() * 15  // 65-80%
-        const charColor = `hsl(${hue}, ${sat}%, ${lit}%)`
-
-        const span = document.createElement('span')
-        span.textContent = nodeText[i]
-        span.style.cssText = `
-          position:fixed;left:${rect.left}px;top:${rect.top}px;
-          width:${rect.width}px;height:${rect.height}px;
-          font:${charFont};color:${charColor};
-          line-height:${charLineHeight};letter-spacing:${charLetterSpacing};
-          white-space:pre;text-align:left;font-kerning:normal;
-          -webkit-font-smoothing:antialiased;text-rendering:geometricPrecision;
-          text-shadow:0 0 8px hsla(${hue},${sat}%,${lit}%,0.4);
-          transform-origin:50% 50%;transform:translate(0,0) rotate(0deg) scale(1);
-          opacity:1;pointer-events:none;will-change:transform,opacity;
-          display:block;
-        `
-        layer.appendChild(span)
-        glyphEls.push({
-          el: span,
-          x: rect.left + rect.width / 2,
-          y: rect.top + rect.height / 2,
-          vx: 0, vy: 0,
-          tx: 0, ty: 0, rot: 0, sc: 1,
-          noise: Math.random() * Math.PI * 2,
-          elapsed: 0,
-          delay: 0,
-          life: 1.2 + Math.random() * 0.6,
-          scattered: false,
-        })
-      }
-    }
-  })
-}
-
-// Scatter all glyphs randomly (no point needed)
-function scatterRandom() {
-  const windSide = Math.random() > 0.5 ? 1 : -1
-  glyphEls.forEach((g, index) => {
-    if (g.scattered) return
-    const angle = -Math.PI / 2 + windSide * (0.18 + Math.random() * 0.72)
-    const speed = 1.25 + Math.random() * 2.2
-    g.vx = Math.cos(angle) * speed + windSide * (0.2 + Math.random() * 0.5)
-    g.vy = Math.sin(angle) * speed - 0.18
-    g.life = 1.05 + Math.random() * 0.48
-    g.delay = Math.min(index * 0.006, 0.26) + Math.random() * 0.08
-    g.elapsed = 0
-    g.scattered = true
-  })
-}
-
-function scatterNear(cx, cy) {
-  const radius = 80
-  glyphEls.forEach(g => {
-    if (!g.scattered) return
-    const dx = g.x + g.tx - cx
-    const dy = g.y + g.ty - cy
-    const dist = Math.sqrt(dx * dx + dy * dy)
-    if (dist < radius && dist > 0) {
-      const force = (1 - dist / radius) * 4
-      g.vx += (dx / dist) * force
-      g.vy += (dy / dist) * force - 0.5
-    }
-  })
-}
-
-function startScatterTick(done) {
-  if (rafId) cancelAnimationFrame(rafId)
-  let prev = null
-  let finished = false
-  let hardStopTimer = null
-
-  function finish() {
-    if (finished) return
-    finished = true
-    if (rafId) {
-      cancelAnimationFrame(rafId)
-      rafId = null
-    }
-    if (hardStopTimer) clearTimeout(hardStopTimer)
-    clearGlyphs()
-    isScattering.value = false
-    setTimeout(done, 100)
-  }
-
-  function tick(ts) {
-    if (finished) return
-    if (!prev) prev = ts
-    const dt = Math.min((ts - prev) / 1000, 0.033)
-    prev = ts
-
-    let anyAlive = false
-
-    glyphEls.forEach(g => {
-      if (!g.scattered) return
-      g.elapsed += dt
-      if (g.elapsed < g.delay) {
-        anyAlive = true
-        return
-      }
-
-      const localElapsed = g.elapsed - g.delay
-      const t = localElapsed / g.life
-      if (t >= 1) return
-      anyAlive = true
-
-      const ease = t * t
-      const drift = Math.sin(g.noise + localElapsed * 2) * 0.32
-      g.tx += (g.vx + drift) * (0.5 + ease * 0.8)
-      g.ty += g.vy * (0.5 + ease * 0.6)
-      g.vy -= 0.012
-      g.rot += g.vx * dt * 25 * (1 + ease)
-      g.sc = (1 - ease) * (0.95 + Math.sin(localElapsed * 6) * 0.05)
-
-      const alpha = t < 0.15 ? 1 : Math.pow(1 - (t - 0.15) / 0.85, 1.6)
-      g.el.style.transform = `translate(${g.tx}px,${g.ty}px) rotate(${g.rot}deg) scale(${g.sc})`
-      g.el.style.opacity = alpha
-    })
-
-    if (anyAlive) {
-      rafId = requestAnimationFrame(tick)
-    } else {
-      finish()
-    }
-  }
-
-  hardStopTimer = setTimeout(finish, 2100)
-  rafId = requestAnimationFrame(tick)
-}
-
 // ── Vue transition hooks ─────────────────────────────────────────
 function onBeforeLeave(el) {
-  skipLeaveScatter = Boolean(window.__fySkipNextPageScatter)
-  window.__fySkipNextPageScatter = false
-  clearGlyphs()
+  pageTransitionId += 1
+  isPageTransitioning.value = true
+  el.style.opacity = ''
+  el.style.transform = ''
+  el.style.filter = ''
   el.classList.remove('page-entering', 'page-disappearing')
-  if (!skipLeaveScatter) collectGlyphs(el)
 }
 
 function onLeave(el, done) {
-  if (skipLeaveScatter) {
-    el.style.opacity = '0'
-    setTimeout(() => {
-      skipLeaveScatter = false
-      done()
-    }, 90)
-    return
-  }
-
-  if (glyphEls.length === 0) {
-    el.style.opacity = '0'
-    setTimeout(done, 240)
-    return
-  }
-
-  isScattering.value = true
-  el.style.opacity = '0'
-  scatterRandom()
-  startScatterTick(done)
+  el.classList.add('page-disappearing')
+  setTimeout(() => {
+    done()
+  }, 280)
 }
 
-function onAfterLeave() {
-  if (rafId) { cancelAnimationFrame(rafId); rafId = null }
-  isScattering.value = false
-  skipLeaveScatter = false
-  clearGlyphs()
-}
-
-function clearGlyphs() {
-  const layer = glyphLayer.value
-  if (layer) layer.innerHTML = ''
-  glyphEls = []
-}
+function onAfterLeave() {}
 
 function onEnter(el, done) {
-  clearGlyphs()
+  const transitionId = pageTransitionId
+  isPageTransitioning.value = true
   el.style.visibility = ''
   el.style.opacity = ''
   el.style.transform = ''
@@ -381,12 +293,16 @@ function onEnter(el, done) {
 
   setTimeout(() => {
     el.classList.remove('page-entering')
+    if (transitionId === pageTransitionId) {
+      isPageTransitioning.value = false
+    }
     done()
-  }, 760)
+  }, 360)
 }
 
 // ── interaction ──────────────────────────────────────────────────
 function handleClick(e) {
+  if (isPageTransitioning.value) return
   if (e.target.closest('input, textarea, button, .choices, .choice-btn, .btn')) return
 
   if (isTerminalPage.value) return
@@ -399,18 +315,11 @@ function handleClick(e) {
   nextPage()
 }
 
-function onTouchMove(e) {
-  if (!isScattering.value) return
-  const t = e.touches[0]
-  if (t) scatterNear(t.clientX, t.clientY)
+function goBack() {
+  if (!canGoBack.value) return
+  previousPage()
 }
 
-function onMouseMove(e) {
-  if (!isScattering.value) return
-  scatterNear(e.clientX, e.clientY)
-}
-
-// ── flowing ambient projection ───────────────────────────────────
 const ambientCanvas = ref(null)
 let ambientParticles = []
 let ambientRaf = null
@@ -612,7 +521,6 @@ function initAmbient() {
 
 onMounted(() => {
   preloadStageBackgrounds()
-  initAmbient()
 })
 
 onUnmounted(() => {
@@ -631,6 +539,84 @@ onUnmounted(() => {
   touch-action: manipulation;
   background: #030203;
   --stage-opacity: 0.92;
+}
+
+.story.is-bg-empty {
+  background: #000;
+}
+
+.story-hud {
+  position: fixed;
+  top: calc(14px + env(safe-area-inset-top));
+  left: 18px;
+  right: 18px;
+  z-index: 6;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  pointer-events: none;
+}
+
+.story-back {
+  position: fixed;
+  left: 18px;
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 7;
+  min-width: 58px;
+  min-height: 34px;
+  border: 1px solid rgba(220, 178, 104, 0.24);
+  border-radius: 18px;
+  background: rgba(7, 5, 5, 0.48);
+  color: rgba(238, 230, 214, 0.72);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  backdrop-filter: blur(8px);
+  pointer-events: auto;
+}
+
+.story-back:active {
+  border-color: rgba(238, 207, 146, 0.7);
+  color: #f0c979;
+  background: rgba(220, 178, 104, 0.12);
+}
+
+.story-progress {
+  min-width: 0;
+  pointer-events: none;
+}
+
+.story-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: rgba(238, 230, 214, 0.48);
+  font-size: 11px;
+  line-height: 1.2;
+  text-shadow: 0 1px 10px rgba(0, 0, 0, 0.5);
+}
+
+.story-progress-meta span {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.phase-progress-track {
+  height: 2px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(238, 230, 214, 0.12);
+}
+
+.phase-progress-fill {
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, rgba(224, 190, 122, 0.48), rgba(246, 215, 153, 0.92));
+  box-shadow: 0 0 12px rgba(255, 168, 64, 0.28);
+  transition: width 0.36s ease;
 }
 
 .stage-bg {
@@ -709,23 +695,4 @@ onUnmounted(() => {
   --stage-opacity: 0.86;
 }
 
-.glyph-layer {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 100;
-}
-
-.ambient-canvas {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 1;
-  opacity: 0.92;
-  mix-blend-mode: screen;
-}
-
-.phase-storm .ambient-canvas {
-  opacity: 1;
-}
 </style>

@@ -147,12 +147,12 @@ watch(() => props.mode, () => { start() })
      identical to surrounding <p> text — the only added behaviour is the
      locked-cell shimmer. */
   display: inline-block;
-  text-align: center;
+  text-align: inherit;
 }
 
 .noise-cell {
   display: inline-block;
-  text-align: center;
+  text-align: inherit;
   /* Width is set inline from pretext-measured advance, so swapping glyphs
      never reflows the line. */
   transition: color 0.4s ease;

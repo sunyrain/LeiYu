@@ -8,9 +8,6 @@
       >
         {{ line }}
       </p>
-      <p v-if="currentBlock.projection" class="projection">
-        {{ currentBlock.projection }}
-      </p>
     </template>
 
     <template v-else-if="gameState.currentPage === 4">
@@ -49,8 +46,7 @@
     </template>
 
     <template v-else-if="gameState.currentPage === 10">
-      <p>Ta要走了，你想____1____。</p>
-      <div class="question-label">1.</div>
+      <p>Ta要走了，你想____。</p>
       <div class="choices">
         <button
           v-for="option in departureOptions"
@@ -59,15 +55,14 @@
           :class="{ selected: departureChoice === option.value }"
           @click="departureChoice = option.value"
         >
-          【{{ option.value }}】{{ option.label }}
+          {{ option.label }}
         </button>
       </div>
       <button class="btn" :disabled="!departureChoice" @click="submitDeparture">确认</button>
     </template>
 
     <template v-else-if="gameState.currentPage === 11">
-      <p>如果Ta重新出现，你会____2____。</p>
-      <div class="question-label">2.</div>
+      <p>如果Ta重新出现，你会____。</p>
       <div class="choices">
         <button
           v-for="option in reunionOptions"
@@ -76,7 +71,7 @@
           :class="{ selected: reunionChoice === option.value }"
           @click="reunionChoice = option.value"
         >
-          【{{ option.value }}】{{ option.label }}
+          {{ option.label }}
         </button>
       </div>
       <button class="btn" :disabled="!reunionChoice" @click="submitReunion">确认</button>
@@ -84,7 +79,7 @@
 
     <template v-else>
       <div class="waiting-state">
-        <p>请静静感受此刻。</p>
+        <p>请静静感受此刻</p>
         <p class="waiting-sub">等待剧情继续</p>
       </div>
     </template>
@@ -94,7 +89,6 @@
 <script setup>
 import { computed, ref } from 'vue'
 import { gameState, setAnswer } from '../../stores/game.js'
-import { runChoiceOutro } from '../../utils/choiceOutro.js'
 
 const currentBlock = computed(() => {
   const textBlocks = {
@@ -106,7 +100,7 @@ const currentBlock = computed(() => {
     },
     2: {
       className: 'large-line',
-      lines: ['它', '空', '空', '的。'],
+      lines: ['它', '空', '空', '的'],
     },
     3: {
       lines: [
@@ -120,7 +114,6 @@ const currentBlock = computed(() => {
         '你伸手触摸那张寻人启事，',
         '指尖一麻。',
       ],
-      projection: '“你就要走吗？”',
     },
     6: {
       lines: [
@@ -128,7 +121,6 @@ const currentBlock = computed(() => {
         '经过墙壁的折叠，',
         '像一段断掉的旧声音。',
       ],
-      projection: '“你心里就这么急么？急着要走。你有权利说这种话么？你忘记了在这屋子里，半夜，我哭的时候，你叹息着说的话么？好了，这次算我求你。”',
     },
     7: {
       lines: ['你也想起了一个人。'],
@@ -151,10 +143,10 @@ const currentBlock = computed(() => {
   }
   return textBlocks[gameState.currentPage]
 })
-const floodInputs = ref(['', '', ''])
-const nameInput = ref('')
-const departureChoice = ref('')
-const reunionChoice = ref('')
+const floodInputs = ref(splitSavedList(gameState.floodItem, 3))
+const nameInput = ref(gameState.lovedOneName || '')
+const departureChoice = ref(gameState.departureAction || '')
+const reunionChoice = ref(gameState.reunionAction || '')
 
 const floodPlaceholders = ['写下第一样东西', '写下第二样东西', '写下第三样东西']
 const canSubmitFlood = computed(() => floodInputs.value.some(item => item.trim()))
@@ -172,6 +164,15 @@ const reunionOptions = [
   { value: 'C', label: '快速扑向ta' },
   { value: 'D', label: '等待ta靠近' },
 ]
+
+function splitSavedList(value, minLength) {
+  const parts = String(value || '')
+    .split(/[,，、\s]+/)
+    .filter(Boolean)
+    .slice(0, minLength)
+  while (parts.length < minLength) parts.push('')
+  return parts
+}
 
 function submitFlood() {
   const value = floodInputs.value
@@ -200,27 +201,17 @@ function submitName() {
   gameState.currentPage = 10
 }
 
-async function submitDeparture(event) {
+function submitDeparture() {
   if (!departureChoice.value) return
   const option = departureOptions.find(item => item.value === departureChoice.value)
   setAnswer('departureAction', departureChoice.value, { label: option.label })
-  await runChoiceOutro({
-    event,
-    advance: () => {
-      gameState.currentPage = 11
-    },
-  })
+  gameState.currentPage = 11
 }
 
-async function submitReunion(event) {
+function submitReunion() {
   if (!reunionChoice.value) return
   const option = reunionOptions.find(item => item.value === reunionChoice.value)
   setAnswer('reunionAction', reunionChoice.value, { label: option.label })
-  await runChoiceOutro({
-    event,
-    advance: () => {
-      gameState.currentPage = 12
-    },
-  })
+  gameState.currentPage = 12
 }
 </script>
