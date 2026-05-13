@@ -70,6 +70,14 @@ npm run install:all
 npm run start:one-click
 ```
 
+打包换电脑运行工具包：
+
+```powershell
+.\make-portable-kit.ps1
+```
+
+详见 [docs/SWITCH_COMPUTER.md](docs/SWITCH_COMPUTER.md)。
+
 启动局域网现场版：
 
 ```powershell

@@ -142,6 +142,18 @@ function Get-LocalHealth {
   }
 }
 
+function Test-AppBuildReady {
+  return (
+    (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'app\package.json')) -and
+    (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'app\node_modules')) -and
+    (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'app\src'))
+  )
+}
+
+function Test-BuiltFrontend {
+  return (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'app\dist\index.html'))
+}
+
 $display = Resolve-DisplayIp
 $displayIp = $display.Ip
 $ipSource = $display.Source
@@ -161,8 +173,14 @@ $adminQr = Join-Path $qrDir 'admin.png'
 $urlsFile = Join-Path $qrDir 'show-urls.txt'
 
 if (-not $NoBuild) {
-  Write-Host "Building audience/admin frontend..."
-  npm --prefix app run build
+  if (Test-AppBuildReady) {
+    Write-Host "Building audience/admin frontend..."
+    npm --prefix app run build
+  } elseif (Test-BuiltFrontend) {
+    Write-Host "Using prebuilt frontend from app/dist."
+  } else {
+    throw "Frontend is not buildable here and app/dist/index.html was not found. Run this from the full repo or rebuild the portable kit."
+  }
 }
 
 $audienceQrApi = ""

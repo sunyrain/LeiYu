@@ -20,6 +20,7 @@ pnpm-debug.log*
 
 # Local-only show/debug artifacts
 preview_exports/
+release/
 draft.md
 docs/background-prompts.md
 start-demo-public.ps1

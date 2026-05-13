@@ -6,6 +6,7 @@
   "scripts": {
     "install:all": "npm --prefix app install && npm --prefix server install",
     "build": "npm --prefix app run build",
+    "make:portable": "powershell -ExecutionPolicy Bypass -File ./make-portable-kit.ps1",
     "start": "npm --prefix server start",
     "start:one-click": "powershell -ExecutionPolicy Bypass -File ./start-one-click.ps1",
     "start:show": "npm --prefix app run build && npm --prefix server start",
