@@ -35,6 +35,8 @@ data/qrcodes/audience.png
 data/qrcodes/admin.png
 ```
 
+如果 `3000` 端口已有本项目服务在运行，脚本会先停止旧服务，再启动新服务。
+
 如果公网 IP 需要手动覆盖：
 
 ```powershell

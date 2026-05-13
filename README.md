@@ -58,6 +58,12 @@ npm run install:all
 .\start-one-click.ps1 -PublicIp 183.172.12.24 -AdminPin "至少8位的后台口令"
 ```
 
+如果 `3000` 端口已经有本项目服务在运行，脚本会自动停止旧服务，再启动新服务。只想复用当前服务、不重启时：
+
+```powershell
+.\start-one-click.ps1 -AdminPin "至少8位的后台口令" -KeepExisting
+```
+
 也可以通过 npm 调用：
 
 ```powershell

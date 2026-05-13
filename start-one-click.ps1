@@ -4,6 +4,7 @@ param(
   [int]$Port = 3000,
   [int]$QrSize = 512,
   [switch]$UseExternalIp,
+  [switch]$KeepExisting,
   [switch]$NoBuild,
   [switch]$NoQr,
   [switch]$NoStart
@@ -109,6 +110,38 @@ function Save-TextQrCode {
   return $apiUrl
 }
 
+function Get-PortListeners {
+  param([int]$ListenPort)
+
+  $rows = @()
+  $pattern = "^\s*TCP\s+(.+):${ListenPort}\s+\S+\s+LISTENING\s+(\d+)\s*$"
+  foreach ($line in (& netstat -ano -p tcp)) {
+    if ($line -match $pattern) {
+      $pidValue = [int]$Matches[2]
+      $process = Get-Process -Id $pidValue -ErrorAction SilentlyContinue
+      $rows += [pscustomobject]@{
+        Address = $Matches[1].Trim()
+        Port = $ListenPort
+        Pid = $pidValue
+        ProcessName = if ($process) { $process.ProcessName } else { "" }
+        Path = if ($process) { $process.Path } else { "" }
+      }
+    }
+  }
+
+  return $rows
+}
+
+function Get-LocalHealth {
+  param([int]$HealthPort)
+
+  try {
+    return Invoke-RestMethod -Uri "http://127.0.0.1:${HealthPort}/api/health" -TimeoutSec 3
+  } catch {
+    return $null
+  }
+}
+
 $display = Resolve-DisplayIp
 $displayIp = $display.Ip
 $ipSource = $display.Source
@@ -170,6 +203,33 @@ Write-Host ""
 if ($NoStart) {
   Write-Host "NoStart was set, so the backend was not started."
   exit 0
+}
+
+$listeners = @(Get-PortListeners -ListenPort $Port)
+if ($listeners.Count -gt 0) {
+  $health = Get-LocalHealth -HealthPort $Port
+  $listenerText = ($listeners | ForEach-Object { "$($_.ProcessName) PID $($_.Pid) on $($_.Address):$($_.Port)" }) -join "; "
+
+  if ($KeepExisting -and $health -and $health.ok) {
+    Write-Host "Port ${Port} is already occupied by a running FY show server: $listenerText"
+    Write-Host "KeepExisting was set. The service is already available at the URLs printed above."
+    exit 0
+  }
+
+  if ($health -and $health.ok) {
+    Write-Host "Port ${Port} is already in use: $listenerText"
+    Write-Host "Stopping the existing FY show server before starting a fresh one..."
+    $listeners | Select-Object -ExpandProperty Pid -Unique | ForEach-Object {
+      Stop-Process -Id $_ -Force
+    }
+    Start-Sleep -Seconds 1
+    $listeners = @(Get-PortListeners -ListenPort $Port)
+    if ($listeners.Count -gt 0) {
+      throw "Port ${Port} is still in use after restart attempt. Close the process manually and run this script again."
+    }
+  } else {
+    throw "Port ${Port} is already in use by another process: $listenerText. Stop it first or use a different -Port."
+  }
 }
 
 $env:HOST = "0.0.0.0"
