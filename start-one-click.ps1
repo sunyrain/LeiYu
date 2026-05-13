@@ -3,6 +3,7 @@ param(
   [string]$AdminPin = "",
   [int]$Port = 3000,
   [int]$QrSize = 512,
+  [switch]$UseExternalIp,
   [switch]$NoBuild,
   [switch]$NoQr,
   [switch]$NoStart
@@ -61,17 +62,36 @@ function Get-ExternalIPv4 {
 }
 
 function Resolve-DisplayIp {
-  if ($PublicIp) { return $PublicIp.Trim() }
-  if ($env:PUBLIC_IP) { return $env:PUBLIC_IP.Trim() }
+  if ($PublicIp) {
+    return [pscustomobject]@{ Ip = $PublicIp.Trim(); Source = "manual -PublicIp" }
+  }
+  if ($env:PUBLIC_IP) {
+    return [pscustomobject]@{ Ip = $env:PUBLIC_IP.Trim(); Source = "PUBLIC_IP environment variable" }
+  }
+
+  if (-not $UseExternalIp) {
+    $localPublic = Get-LocalPublicIPv4
+    if ($localPublic) {
+      return [pscustomobject]@{ Ip = $localPublic; Source = "local public network adapter" }
+    }
+  }
 
   $external = Get-ExternalIPv4
-  if ($external) { return $external }
+  if ($external) {
+    return [pscustomobject]@{ Ip = $external; Source = "external public IP lookup" }
+  }
 
-  $localPublic = Get-LocalPublicIPv4
-  if ($localPublic) { return $localPublic }
+  if ($UseExternalIp) {
+    $localPublic = Get-LocalPublicIPv4
+    if ($localPublic) {
+      return [pscustomobject]@{ Ip = $localPublic; Source = "local public network adapter fallback" }
+    }
+  }
 
   $private = Get-PrivateIPv4
-  if ($private) { return $private }
+  if ($private) {
+    return [pscustomobject]@{ Ip = $private; Source = "private LAN adapter fallback" }
+  }
 
   throw "No usable IPv4 address was found. You can pass one explicitly, for example: .\start-one-click.ps1 -PublicIp 183.172.12.24"
 }
@@ -89,7 +109,9 @@ function Save-TextQrCode {
   return $apiUrl
 }
 
-$displayIp = Resolve-DisplayIp
+$display = Resolve-DisplayIp
+$displayIp = $display.Ip
+$ipSource = $display.Source
 if (-not $AdminPin) {
   $AdminPin = if ($env:ADMIN_PIN) { $env:ADMIN_PIN } else { New-AdminPin }
 }
@@ -131,7 +153,7 @@ if (-not $NoQr) {
 Write-Host ""
 Write-Host "FY show service is ready."
 Write-Host "Running IP:   $displayIp"
-Write-Host "IP source:    realtime public IP detection, unless -PublicIp or PUBLIC_IP was provided"
+Write-Host "IP source:    $ipSource"
 Write-Host "Bind address: 0.0.0.0:${Port}"
 Write-Host "Audience URL: $audienceUrl"
 Write-Host "Admin URL:    $adminUrl"
