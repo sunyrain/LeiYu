@@ -55,10 +55,12 @@ $releaseRoot = Resolve-InRoot $OutputDir
 $kitName = "fangyi-2026-portable-$timestamp"
 $kitDir = Join-Path $releaseRoot $kitName
 $zipPath = Join-Path $releaseRoot "$kitName.zip"
+$macTarPath = Join-Path $releaseRoot "$kitName-macos.tar.gz"
 
 New-Item -ItemType Directory -Force -Path $releaseRoot | Out-Null
 if (Test-Path -LiteralPath $kitDir) { Remove-Item -LiteralPath $kitDir -Recurse -Force }
 if (Test-Path -LiteralPath $zipPath) { Remove-Item -LiteralPath $zipPath -Force }
+if (Test-Path -LiteralPath $macTarPath) { Remove-Item -LiteralPath $macTarPath -Force }
 New-Item -ItemType Directory -Force -Path $kitDir | Out-Null
 
 Write-Host "Copying runtime files..."
@@ -66,7 +68,9 @@ Write-Host "Copying runtime files..."
 Copy-RootFile 'README.md'
 Copy-RootFile 'package.json'
 Copy-RootFile 'RUN_SHOW.bat'
+Copy-RootFile 'RUN_SHOW_MAC.command'
 Copy-RootFile 'start-one-click.ps1'
+Copy-RootFile 'start-one-click-mac.sh'
 Copy-RootFile 'make-portable-kit.ps1'
 Copy-RootFile 'start-local-only.ps1'
 Copy-RootFile 'start-show.ps1'
@@ -85,6 +89,18 @@ Copy-Path -From (Join-Path $PSScriptRoot 'server\package-lock.json') -To (Join-P
 Copy-Path -From (Join-Path $PSScriptRoot 'server\.env.example') -To (Join-Path $kitDir 'server\.env.example')
 
 New-Item -ItemType Directory -Force -Path (Join-Path $kitDir 'data') | Out-Null
+
+function Set-LfFile {
+  param([string]$Path)
+  if (-not (Test-Path -LiteralPath $Path)) { return }
+  $text = [System.IO.File]::ReadAllText($Path)
+  $text = $text -replace "`r`n", "`n"
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $text, $utf8NoBom)
+}
+
+Set-LfFile (Join-Path $kitDir 'RUN_SHOW_MAC.command')
+Set-LfFile (Join-Path $kitDir 'start-one-click-mac.sh')
 
 if ($IncludeCurrentData) {
   Write-Host "Including current runtime data JSON files..."
@@ -107,26 +123,19 @@ if ($IncludeSource) {
 $nodeVersion = ""
 try { $nodeVersion = (& node -v) } catch { $nodeVersion = "Node.js 20+ recommended" }
 
-@"
+$readmeTemplate = @'
 # Fangyi 2026 portable show kit
 
-This package is ready to run on another Windows computer.
+This package can run on Windows or macOS. Install Node.js 20 or newer first
+(https://nodejs.org/). This kit was packed with: __NODE_VERSION__
 
-Requirements:
-- Install Node.js 20 or newer if the computer does not already have Node.
-- This kit was packed with: $nodeVersion
+## Windows
 
-Start the show:
+Double-click `RUN_SHOW.bat`, or run in PowerShell:
 
 ```powershell
 .\start-one-click.ps1 -AdminPin LeiYu2026Check
 ```
-
-The launcher will:
-- read the current public IPv4 from the new computer network adapter,
-- generate audience/admin QR codes in data/qrcodes/,
-- stop an old FY show server on port 3000 if one is already running,
-- start a fresh server on 0.0.0.0:3000.
 
 If Windows blocks scripts, run PowerShell as the current user once:
 
@@ -134,17 +143,127 @@ If Windows blocks scripts, run PowerShell as the current user once:
 Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 ```
 
+## macOS
+
+The first time, open Terminal in this folder and mark the launchers executable:
+
+```bash
+chmod +x RUN_SHOW_MAC.command start-one-click-mac.sh
+```
+
+Then double-click `RUN_SHOW_MAC.command`, or run in Terminal:
+
+```bash
+./start-one-click-mac.sh --admin-pin LeiYu2026Check
+```
+
+If macOS Gatekeeper warns about an unidentified developer, right-click the
+`.command` file, choose **Open**, then **Open** in the dialog. You only need
+to do this once.
+
+## What the launcher does
+
+- detects the current public IPv4 of the host network adapter,
+- generates audience/admin QR codes in `data/qrcodes/`,
+- stops an old FY show server on port 3000 if one is already running,
+- starts a fresh server on `0.0.0.0:3000`.
+
 Do not share the admin URL or admin QR with audiences.
-"@ | Set-Content -Path (Join-Path $kitDir 'PORTABLE_README.md') -Encoding UTF8
+'@
+
+$readmeText = $readmeTemplate.Replace('__NODE_VERSION__', $nodeVersion)
+Set-Content -Path (Join-Path $kitDir 'PORTABLE_README.md') -Value $readmeText -Encoding UTF8
 
 Write-Host "Creating zip..."
-Compress-Archive -LiteralPath $kitDir -DestinationPath $zipPath -Force
+
+# Compress-Archive in Windows PowerShell 5.1 stores entry names with backslashes,
+# which macOS Archive Utility refuses to expand ("cannot create directory").
+# Build the zip manually so every entry uses forward slashes and is portable.
+function New-PortableZip {
+  param(
+    [string]$SourceDir,
+    [string]$ZipPath
+  )
+
+  Add-Type -AssemblyName System.IO.Compression
+  Add-Type -AssemblyName System.IO.Compression.FileSystem
+
+  if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force }
+
+  $rootName = Split-Path -Leaf $SourceDir
+  $sourceFull = (Resolve-Path -LiteralPath $SourceDir).Path.TrimEnd('\','/')
+  $stream = [System.IO.File]::Open($ZipPath, [System.IO.FileMode]::Create)
+  try {
+    $zip = New-Object System.IO.Compression.ZipArchive($stream, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+      foreach ($file in Get-ChildItem -LiteralPath $sourceFull -Recurse -File -Force) {
+        $relative = $file.FullName.Substring($sourceFull.Length).TrimStart('\','/').Replace('\','/')
+        $entryName = "$rootName/$relative"
+        $entry = $zip.CreateEntry($entryName, [System.IO.Compression.CompressionLevel]::Optimal)
+        $entryStream = $entry.Open()
+        try {
+          $fs = [System.IO.File]::OpenRead($file.FullName)
+          try { $fs.CopyTo($entryStream) } finally { $fs.Dispose() }
+        } finally {
+          $entryStream.Dispose()
+        }
+      }
+    } finally {
+      $zip.Dispose()
+    }
+  } finally {
+    $stream.Dispose()
+  }
+}
+
+New-PortableZip -SourceDir $kitDir -ZipPath $zipPath
+
+Write-Host "Creating macOS tar.gz..."
+
+$tarScript = @'
+import os
+import sys
+import tarfile
+
+source_dir = os.path.abspath(sys.argv[1])
+out_file = os.path.abspath(sys.argv[2])
+root_name = os.path.basename(source_dir.rstrip(os.sep))
+executable_names = {'RUN_SHOW_MAC.command', 'start-one-click-mac.sh'}
+
+with tarfile.open(out_file, 'w:gz', format=tarfile.PAX_FORMAT) as tar:
+    for current_root, dirs, files in os.walk(source_dir):
+        dirs[:] = sorted(dirs)
+        files = sorted(files)
+
+        rel_dir = os.path.relpath(current_root, source_dir)
+        arc_dir = root_name if rel_dir == '.' else f"{root_name}/{rel_dir.replace(os.sep, '/')}"
+        dir_info = tar.gettarinfo(current_root, arcname=arc_dir)
+        dir_info.mode = 0o755
+        tar.addfile(dir_info)
+
+        for name in files:
+            full_path = os.path.join(current_root, name)
+            rel_path = os.path.relpath(full_path, source_dir).replace(os.sep, '/')
+            arcname = f"{root_name}/{rel_path}"
+            info = tar.gettarinfo(full_path, arcname=arcname)
+            info.mode = 0o755 if name in executable_names else 0o644
+            with open(full_path, 'rb') as handle:
+                tar.addfile(info, handle)
+'@
+
+$tarScript | python - $kitDir $macTarPath
 
 $zipInfo = Get-Item -LiteralPath $zipPath
+$macTarInfo = Get-Item -LiteralPath $macTarPath
 Write-Host ""
 Write-Host "Portable kit created:"
 Write-Host $zipInfo.FullName
 Write-Host ("Size: {0:N1} MB" -f ($zipInfo.Length / 1MB))
 Write-Host ""
+Write-Host "macOS kit created:"
+Write-Host $macTarInfo.FullName
+Write-Host ("Size: {0:N1} MB" -f ($macTarInfo.Length / 1MB))
+Write-Host ""
 Write-Host "Copy this zip to the new computer, unzip it, then run:"
-Write-Host ".\start-one-click.ps1 -AdminPin LeiYu2026Check"
+Write-Host "  Windows: .\start-one-click.ps1 -AdminPin LeiYu2026Check  (or double-click RUN_SHOW.bat)"
+Write-Host "  macOS:   extract the .tar.gz, then double-click RUN_SHOW_MAC.command"

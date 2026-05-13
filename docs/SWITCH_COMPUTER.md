@@ -6,10 +6,11 @@
 .\make-portable-kit.ps1
 ```
 
-生成的 zip 会放在 `release/` 目录，例如：
+生成的包会放在 `release/` 目录，例如：
 
 ```text
 release/fangyi-2026-portable-YYYYMMDD-HHMMSS.zip
+release/fangyi-2026-portable-YYYYMMDD-HHMMSS-macos.tar.gz
 ```
 
 这个包包含：
@@ -49,15 +50,23 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 ## 3. 在新电脑启动
 
-解压 zip，进入解压后的目录。
+Windows 使用 `.zip`。macOS 优先使用 `-macos.tar.gz`，它会保留 `.command` 启动文件的可执行权限。
 
-最稳妥的方式是双击：
+解压包，进入解压后的目录。
+
+Windows 最稳妥的方式是双击：
 
 ```text
 RUN_SHOW.bat
 ```
 
-这个入口会自动绕过 PowerShell 执行策略，并且如果启动失败会停在窗口里显示错误。
+macOS 最稳妥的方式是双击：
+
+```text
+RUN_SHOW_MAC.command
+```
+
+这些入口会自动处理平台上的启动细节，并且如果启动失败会停在窗口里显示错误。
 
 也可以手动在 PowerShell 里运行：
 
