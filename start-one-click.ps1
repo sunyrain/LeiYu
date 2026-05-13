@@ -64,11 +64,11 @@ function Resolve-DisplayIp {
   if ($PublicIp) { return $PublicIp.Trim() }
   if ($env:PUBLIC_IP) { return $env:PUBLIC_IP.Trim() }
 
-  $localPublic = Get-LocalPublicIPv4
-  if ($localPublic) { return $localPublic }
-
   $external = Get-ExternalIPv4
   if ($external) { return $external }
+
+  $localPublic = Get-LocalPublicIPv4
+  if ($localPublic) { return $localPublic }
 
   $private = Get-PrivateIPv4
   if ($private) { return $private }
@@ -131,6 +131,7 @@ if (-not $NoQr) {
 Write-Host ""
 Write-Host "FY show service is ready."
 Write-Host "Running IP:   $displayIp"
+Write-Host "IP source:    realtime public IP detection, unless -PublicIp or PUBLIC_IP was provided"
 Write-Host "Bind address: 0.0.0.0:${Port}"
 Write-Host "Audience URL: $audienceUrl"
 Write-Host "Admin URL:    $adminUrl"

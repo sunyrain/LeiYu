@@ -52,7 +52,7 @@ npm run install:all
 .\start-one-click.ps1
 ```
 
-脚本会自动构建前端、输出运行 IP、观众端地址、后台地址，并把二维码保存到 `data/qrcodes/`。如需固定公网 IP 或后台口令：
+脚本会自动构建前端，实时检测当前网络出口公网 IP，输出运行 IP、观众端地址、后台地址，并把二维码保存到 `data/qrcodes/`。到新场地后直接重新运行脚本即可生成新地址的二维码。如需手动覆盖 IP 或指定后台口令：
 
 ```powershell
 .\start-one-click.ps1 -PublicIp 183.172.12.24 -AdminPin "至少8位的后台口令"
