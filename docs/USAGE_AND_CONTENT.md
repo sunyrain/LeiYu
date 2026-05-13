@@ -22,6 +22,25 @@ npm run install:all
 .\start-local-only.ps1
 ```
 
+一键启动并生成二维码：
+
+```powershell
+.\start-one-click.ps1
+```
+
+这个脚本会自动构建前端，输出运行 IP、观众端地址和后台地址，并通过草料二维码开放接口生成两张 PNG：
+
+```text
+data/qrcodes/audience.png
+data/qrcodes/admin.png
+```
+
+如果公网 IP 需要手动指定：
+
+```powershell
+.\start-one-click.ps1 -PublicIp 183.172.12.24 -AdminPin "至少8位的后台口令"
+```
+
 公网一次性启动：
 
 ```powershell

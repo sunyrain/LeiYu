@@ -46,6 +46,24 @@
 npm run install:all
 ```
 
+一键公网/局域网启动，并生成观众端和后台二维码：
+
+```powershell
+.\start-one-click.ps1
+```
+
+脚本会自动构建前端、输出运行 IP、观众端地址、后台地址，并把二维码保存到 `data/qrcodes/`。如需固定公网 IP 或后台口令：
+
+```powershell
+.\start-one-click.ps1 -PublicIp 183.172.12.24 -AdminPin "至少8位的后台口令"
+```
+
+也可以通过 npm 调用：
+
+```powershell
+npm run start:one-click
+```
+
 启动局域网现场版：
 
 ```powershell
