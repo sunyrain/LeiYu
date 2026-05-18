@@ -17,15 +17,12 @@
     ></div>
     <div class="story-hud">
       <div class="story-progress" aria-live="polite">
-        <div class="story-progress-meta">
-          <span>{{ phaseLabels[gameState.currentPhase] }} {{ currentPhasePage }} / {{ currentPhaseTotal }}</span>
-          <span>总页码 {{ currentTotalPage }} / {{ totalPageCount }}</span>
-        </div>
         <div class="phase-progress-track" aria-hidden="true">
           <div class="phase-progress-fill" :style="{ width: `${phaseProgressPercent}%` }"></div>
         </div>
       </div>
     </div>
+    <div class="story-page-index">【{{ currentTotalPage }}】</div>
     <button
       v-if="showBackButton"
       type="button"
@@ -53,40 +50,32 @@
 import { computed, ref, onMounted, onUnmounted, watch, nextTick } from 'vue'
 import { gameState, nextPage, previousPage } from '../stores/game.js'
 import EntryPhase from './phases/EntryPhase.vue'
-import ProloguePhase from './phases/ProloguePhase.vue'
 import Act1Phase from './phases/Act1Phase.vue'
 import Act2Phase from './phases/Act2Phase.vue'
 import Act3Phase from './phases/Act3Phase.vue'
-import Act4Phase from './phases/Act4Phase.vue'
 
 const phaseComponents = {
   entry: EntryPhase,
-  prologue: ProloguePhase,
   act1: Act1Phase,
   act2: Act2Phase,
   act3: Act3Phase,
-  act4: Act4Phase,
 }
 
 const currentComponent = computed(() => phaseComponents[gameState.currentPhase])
 
 const phaseLabels = {
   entry: '进场',
-  prologue: '序章',
-  act1: '交互一',
-  act2: '交互二',
-  act3: '交互三',
-  act4: '交互四',
+  act1: '交互1',
+  act2: '交互2',
+  act3: '交互3',
 }
 
-const phaseOrder = ['entry', 'prologue', 'act1', 'act2', 'act3', 'act4']
+const phaseOrder = ['entry', 'act1', 'act2', 'act3']
 const phasePageCounts = {
-  entry: 3,
-  prologue: 1,
-  act1: 14,
-  act2: 9,
-  act3: 9,
-  act4: 7,
+  entry: 5,
+  act1: 3,
+  act2: 4,
+  act3: 3,
 }
 
 const totalPageCount = Object.values(phasePageCounts).reduce((sum, count) => sum + count, 0)
@@ -102,31 +91,30 @@ const currentTotalPage = computed(() => {
 const phaseProgressPercent = computed(() => {
   return Math.round((currentPhasePage.value / currentPhaseTotal.value) * 100)
 })
-const showBackButton = computed(() => gameState.currentPage > 0)
+const showBackButton = computed(() => false)
 const canGoBack = computed(() => showBackButton.value && !isPageTransitioning.value)
 
 function clampPage(page, total) {
   return Math.min(Math.max(page, 1), Math.max(total, 1))
 }
 
-const backgroundVersion = '20260512-cover'
+const backgroundVersion = '20260517-v2'
 
 const pageBackgrounds = {
   entry: [
-    pageBackgroundPath('entry-cover'),
-    pageBackgroundPath('entry-0'),
-    pageBackgroundPath('entry-1'),
+    v2BackgroundPath(1),
+    v2BackgroundPath(2),
+    v2BackgroundPath(3),
+    v2BackgroundPath(4),
+    v2BackgroundPath(5),
   ],
-  prologue: [
-    pageBackgroundPath('prologue-0'),
-  ],
-  act1: pageBackgroundRange('act1', 14),
-  act2: pageBackgroundRange('act2', 9),
-  act3: pageBackgroundRange('act3', 9),
-  act4: [
-    ...pageBackgroundRange('act4', 6),
-    '',
-  ],
+  act1: [v2BackgroundPath(6), v2BackgroundPath(7), v2BackgroundPath(8)],
+  act2: [v2BackgroundPath(9), v2BackgroundPath(10), v2BackgroundPath(11), v2BackgroundPath(12)],
+  act3: [v2BackgroundPath(13), v2BackgroundPath(14), v2BackgroundPath(15)],
+}
+
+function v2BackgroundPath(number) {
+  return `/backgrounds/v2/page-${number}.png?v=${backgroundVersion}`
 }
 
 function pageBackgroundPath(name) {
@@ -187,11 +175,9 @@ function preloadStageBackground(src) {
 
 const phaseIntensity = {
   entry: 'quiet',
-  prologue: 'searching',
   act1: 'flood',
   act2: 'storm',
   act3: 'rebuild',
-  act4: 'afterstorm',
 }
 
 const phaseClass = computed(() => `phase-${phaseIntensity[gameState.currentPhase] || 'quiet'}`)
@@ -222,23 +208,21 @@ watch(
 )
 
 const interactivePages = {
-  entry: [1, 2],
-  prologue: [],
-  act1: [4, 9, 10, 11],
-  act2: [5, 7],
-  act3: [6, 7],
-  act4: [2, 3, 4, 5],
+  entry: [1, 4],
+  act1: [1],
+  act2: [0, 1, 2],
+  act3: [0],
 }
 
 const terminalPages = {
-  act4: 6,
+  act3: 2,
 }
 
 const controlledPausePages = {
-  prologue: [0],
-  act1: [5, 6, 13],
-  act2: [3, 5, 8],
-  act3: [3, 8],
+  entry: [4],
+  act1: [0, 2],
+  act2: [3],
+  act3: [2],
 }
 
 const isPageTransitioning = ref(false)
@@ -328,11 +312,9 @@ let ambientSize = { w: 0, h: 0, dpr: 1 }
 
 const ambientProfiles = {
   entry: { count: 30, particleAlpha: 0.7, flowAlpha: 0.14, speed: 0.24, lift: 0.42, wind: 0.08, strands: 4, amp: 5, band: 46, floor: 0.78, curtains: 2 },
-  prologue: { count: 44, particleAlpha: 0.84, flowAlpha: 0.2, speed: 0.32, lift: 0.52, wind: 0.1, strands: 5, amp: 7, band: 56, floor: 0.76, curtains: 4 },
   act1: { count: 58, particleAlpha: 0.86, flowAlpha: 0.25, speed: 0.34, lift: 0.38, wind: 0.09, strands: 7, amp: 8, band: 66, floor: 0.8, curtains: 4 },
   act2: { count: 92, particleAlpha: 1, flowAlpha: 0.54, speed: 0.72, lift: 0.78, wind: 0.18, strands: 13, amp: 15, band: 116, floor: 0.73, curtains: 12 },
   act3: { count: 56, particleAlpha: 0.82, flowAlpha: 0.22, speed: 0.3, lift: 0.46, wind: 0.08, strands: 6, amp: 6, band: 58, floor: 0.78, curtains: 3 },
-  act4: { count: 42, particleAlpha: 0.76, flowAlpha: 0.16, speed: 0.22, lift: 0.34, wind: 0.05, strands: 4, amp: 4, band: 42, floor: 0.78, curtains: 2 },
 }
 
 function currentAmbientProfile() {
@@ -547,10 +529,12 @@ onUnmounted(() => {
 
 .story-hud {
   position: fixed;
-  top: calc(14px + env(safe-area-inset-top));
-  left: 18px;
-  right: 18px;
+  top: calc(18px + env(safe-area-inset-top));
+  left: 50%;
+  right: auto;
+  width: min(54vw, 260px);
   z-index: 6;
+  transform: translateX(-50%);
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
@@ -604,8 +588,20 @@ onUnmounted(() => {
   white-space: nowrap;
 }
 
+.story-page-index {
+  position: fixed;
+  right: calc(18px + env(safe-area-inset-right));
+  bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 6;
+  color: rgba(242, 234, 219, 0.62);
+  font-size: 13px;
+  line-height: 1;
+  text-shadow: 0 1px 12px rgba(0, 0, 0, 0.62);
+  pointer-events: none;
+}
+
 .phase-progress-track {
-  height: 2px;
+  height: 3px;
   overflow: hidden;
   border-radius: 999px;
   background: rgba(238, 230, 214, 0.12);

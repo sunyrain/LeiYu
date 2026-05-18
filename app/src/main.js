@@ -8,6 +8,6 @@ const app = createApp(App)
 app.use(router)
 app.mount('#app')
 
-if (!window.location.pathname.startsWith('/admin')) {
+if (!window.location.pathname.startsWith('/admin') && !window.location.pathname.startsWith('/talk')) {
   initAudienceBackend()
 }

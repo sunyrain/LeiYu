@@ -4,7 +4,15 @@ import fsp from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { WebSocketServer } from 'ws'
-import { MONOLOGUE3_FIXED_ENDING, MONOLOGUE_PROMPTS, POEM_PROMPT, fallbackMaterials, fallbackMonologue } from './prompt.js'
+import { MONOLOGUE3_FIXED_ENDING, MONOLOGUE_PROMPTS, fallbackMonologue } from './prompt.js'
+import {
+  ENTRY_PROFILE_PROMPT,
+  FRONT_POEM_SLOT_PROMPTS,
+  TALK_PROMPT,
+  fallbackEntryProfile,
+  fallbackPoemBlocks,
+  fallbackTalkReply,
+} from './talk-prompt.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const projectRoot = path.resolve(__dirname, '..', '..')
@@ -12,7 +20,6 @@ const appDist = path.join(projectRoot, 'app', 'dist')
 const dataDir = path.join(projectRoot, 'data')
 const stateFile = path.join(dataDir, 'show-state.json')
 const answersFile = path.join(dataDir, 'answers.json')
-const materialsFile = path.join(dataDir, 'materials.json')
 const monologuesFile = path.join(dataDir, 'monologues.json')
 
 loadDotEnv(path.join(projectRoot, '.env'))
@@ -24,8 +31,17 @@ const DEEPSEEK_BASE_URL = process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek
 const DEEPSEEK_MODEL = process.env.DEEPSEEK_MODEL || 'deepseek-chat'
 const ADMIN_PIN = String(process.env.ADMIN_PIN || '')
 
-const phaseOrder = ['entry', 'prologue', 'act1', 'act2', 'act3', 'act4']
-const phaseToAnswerIndex = { act1: 0, act2: 1, act3: 2, act4: 3 }
+const phaseOrder = ['entry', 'act1', 'act2', 'act3']
+const phaseToAnswerIndex = { entry: 0, act1: 1, act2: 2, act3: 3 }
+const currentQuestionIds = new Set([
+  'entryWish',
+  'lovedOneName',
+  'leaveChoice',
+  'departureAction',
+  'reunionAction',
+  'roomBase',
+  'poemMaterials',
+])
 const monologueQuestionGroups = {
   monologue1: ['lovedOneName'],
   monologue2: [],
@@ -42,7 +58,6 @@ let showState = {
 
 const sessions = new Map()
 let answers = []
-let generatedMaterials = []
 let generatedMonologues = []
 
 await ensureData()
@@ -143,8 +158,8 @@ async function ensureData() {
 
 async function loadPersistedData() {
   showState = await readJson(stateFile, showState)
-  answers = await readJson(answersFile, [])
-  generatedMaterials = await readJson(materialsFile, [])
+  showState = normalizeShowState(showState)
+  answers = filterCurrentAnswers(await readJson(answersFile, []))
   generatedMonologues = await readJson(monologuesFile, [])
 }
 
@@ -163,7 +178,6 @@ function persistStateSoon() {
     await Promise.all([
       writeJson(stateFile, showState),
       writeJson(answersFile, answers),
-      writeJson(materialsFile, generatedMaterials),
       writeJson(monologuesFile, generatedMonologues),
     ])
   }, 100)
@@ -231,24 +245,6 @@ async function handleApi(req, res) {
     return
   }
 
-  if (req.method === 'POST' && url.pathname === '/api/generate-materials') {
-    const body = await readBody(req)
-    const result = await generateMaterials(body.userContext || body)
-    const record = {
-      id: makeId('mat'),
-      sessionId: body.sessionId || '',
-      roomNumber: body.roomNumber || '',
-      materials: result.materials,
-      fallback: result.fallback,
-      error: result.error || '',
-      createdAt: Date.now(),
-    }
-    generatedMaterials.push(record)
-    persistStateSoon()
-    sendJson(res, 200, result)
-    return
-  }
-
   if (req.method === 'POST' && url.pathname === '/api/generate-monologue') {
     if (!isAdminHttpAuthorized(req, url)) return sendJson(res, 401, { error: 'unauthorized' })
     const body = await readBody(req)
@@ -270,6 +266,34 @@ async function handleApi(req, res) {
     return
   }
 
+  if (req.method === 'POST' && url.pathname === '/api/talk-chat') {
+    const body = await readBody(req)
+    const messages = normalizeTalkMessages(body.messages || body.conversation || [])
+    if (!messages.length) {
+      sendJson(res, 400, { error: 'bad_request', message: 'messages required' })
+      return
+    }
+
+    const result = await generateTalkReply(messages)
+    sendJson(res, 200, result)
+    return
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/extract-entry-profile') {
+    const body = await readBody(req)
+    const messages = normalizeTalkMessages(body.messages || body.conversation || [])
+    const result = await extractEntryProfile(messages)
+    sendJson(res, 200, result)
+    return
+  }
+
+  if (req.method === 'POST' && url.pathname === '/api/generate-front-poem-blocks') {
+    const body = await readBody(req)
+    const result = await generateFrontPoemBlocks(body)
+    sendJson(res, 200, result)
+    return
+  }
+
   sendJson(res, 404, { error: 'not_found' })
 }
 
@@ -281,45 +305,6 @@ async function readBody(req) {
     return JSON.parse(raw)
   } catch {
     return {}
-  }
-}
-
-async function generateMaterials(userContext) {
-  if (!process.env.DEEPSEEK_API_KEY) {
-    return { materials: fallbackMaterials(userContext), fallback: true, error: 'missing_api_key' }
-  }
-
-  const userMessage = `观众此前的输入和选择：
-- 房间里的三件物：${userContext.floodItem || '未填写'}
-- 心中的名字：${userContext.lovedOneName || '未填写'}
-- Ta要走了时的反应：${userContext.departureAction || '未选择'}
-- Ta重新出现时的反应：${userContext.reunionAction || '未选择'}
-- 面对寻人启事的动作：${userContext.noticeAction || '未选择'}
-- 河水涨到脚边时的动作：${userContext.riverAction || '未选择'}
-
-请基于以上观众的个人输入，生成拼贴诗素材。`
-
-  const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 12000)
-
-  try {
-    const text = await requestChatText({
-      messages: [
-        { role: 'system', content: POEM_PROMPT },
-        { role: 'user', content: userMessage },
-      ],
-      temperature: 0.9,
-      maxTokens: 1024,
-      signal: controller.signal,
-    })
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (!jsonMatch) throw new Error('No JSON found in response')
-
-    return { materials: JSON.parse(jsonMatch[0]), fallback: false }
-  } catch (error) {
-    return { materials: fallbackMaterials(userContext), fallback: true, error: error.message }
-  } finally {
-    clearTimeout(timeout)
   }
 }
 
@@ -383,6 +368,143 @@ async function generateMonologue(kind) {
   } finally {
     clearTimeout(timeout)
   }
+}
+
+async function generateTalkReply(messages) {
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return {
+      reply: fallbackTalkReply(messages),
+      fallback: true,
+      error: 'missing_api_key',
+      sourceCount: messages.length,
+    }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 18000)
+
+  try {
+    const text = await requestChatText({
+      messages: [
+        { role: 'system', content: TALK_PROMPT },
+        ...messages,
+      ],
+      temperature: 0.88,
+      maxTokens: 360,
+      signal: controller.signal,
+    })
+    return {
+      reply: cleanTalkReply(text),
+      fallback: false,
+      sourceCount: messages.length,
+    }
+  } catch (error) {
+    return {
+      reply: fallbackTalkReply(messages),
+      fallback: true,
+      error: error.message,
+      sourceCount: messages.length,
+    }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function extractEntryProfile(messages) {
+  const fallback = normalizeEntryProfile(fallbackEntryProfile(messages), {})
+  if (!messages.length) {
+    return { profile: fallback, fallback: true, error: 'messages_required' }
+  }
+
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return { profile: fallback, fallback: true, error: 'missing_api_key' }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 12000)
+
+  try {
+    const text = await requestChatText({
+      messages: [
+        { role: 'system', content: ENTRY_PROFILE_PROMPT },
+        { role: 'user', content: formatTalkMessagesForProfile(messages) },
+      ],
+      temperature: 0.28,
+      maxTokens: 260,
+      signal: controller.signal,
+    })
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) throw new Error('No JSON found in response')
+    return {
+      profile: normalizeEntryProfile(JSON.parse(jsonMatch[0]), fallback),
+      fallback: false,
+    }
+  } catch (error) {
+    return { profile: fallback, fallback: true, error: error.message }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function generateFrontPoemBlocks(userContext) {
+  const fallback = fallbackPoemBlocks(userContext)
+  if (!process.env.DEEPSEEK_API_KEY) {
+    return { blocks: fallback, fallback: true, error: 'missing_api_key' }
+  }
+
+  const controller = new AbortController()
+  const timeout = setTimeout(() => controller.abort(), 22000)
+
+  try {
+    const context = formatFrontPoemContext(userContext)
+    const [want, belief, texture] = await Promise.all([
+      generateFrontPoemSlot('want', context, fallback.want, controller.signal),
+      generateFrontPoemSlot('belief', context, fallback.belief, controller.signal),
+      generateFrontPoemSlot('texture', context, fallback.texture, controller.signal),
+    ])
+
+    return {
+      blocks: {
+        want,
+        belief,
+        texture,
+        wild: [],
+      },
+      fallback: false,
+    }
+  } catch (error) {
+    return { blocks: fallback, fallback: true, error: error.message }
+  } finally {
+    clearTimeout(timeout)
+  }
+}
+
+async function generateFrontPoemSlot(kind, context, fallback, signal) {
+  const prompt = FRONT_POEM_SLOT_PROMPTS[kind]
+  if (!prompt) return normalizeSlotItems([], fallback, kind)
+
+  const text = await requestChatText({
+    messages: [
+      { role: 'system', content: prompt },
+      { role: 'user', content: context },
+    ],
+    temperature: kind === 'texture' ? 0.82 : 0.88,
+    maxTokens: 320,
+    signal,
+  })
+
+  const jsonMatch = text.match(/\{[\s\S]*\}/)
+  if (!jsonMatch) throw new Error(`No JSON found in ${kind} response`)
+  const parsed = JSON.parse(jsonMatch[0])
+  return normalizeSlotItems(parsed.items, fallback, kind)
+}
+
+function formatFrontPoemContext(userContext) {
+  return [
+    `观众进场聊天内容：${userContext.entryWish || userContext.prompt || '未填写'}`,
+    `观众进场聊天全文：${formatEntryChatLogForPrompt(userContext.entryChatLog)}`,
+    `观众画像：${formatEntryProfileForPrompt(userContext.entryProfile)}`,
+  ].join('\n')
 }
 
 function postProcessMonologue(kind, text, sourceAnswers) {
@@ -514,6 +636,138 @@ function formatAnswersForPrompt(sourceAnswers) {
     .join('\n')
 }
 
+function normalizeTalkMessages(messages) {
+  if (!Array.isArray(messages)) return []
+
+  return messages
+    .filter(message => message && (message.role === 'user' || message.role === 'assistant'))
+    .map(message => ({
+      role: message.role,
+      content: String(message.content || '').trim().slice(0, 1200),
+    }))
+    .filter(message => message.content)
+    .slice(-16)
+}
+
+function cleanTalkReply(text) {
+  return String(text || '')
+    .replace(/^```[a-zA-Z]*\s*/, '')
+    .replace(/```$/g, '')
+    .replace(/^[\s"“”'‘’`]+|[\s"“”'‘’`]+$/g, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+function formatTalkMessagesForProfile(messages) {
+  return messages
+    .filter(message => message.role === 'user' || message.role === 'assistant')
+    .map(message => `${message.role === 'assistant' ? '繁漪' : '观众'}：${message.content}`)
+    .join('\n')
+}
+
+function formatEntryProfileForPrompt(profile) {
+  const normalized = normalizeEntryProfile(profile, {})
+  if (!Object.values(normalized).some(value => Array.isArray(value) ? value.length : value)) {
+    return '未提取'
+  }
+  return JSON.stringify(normalized)
+}
+
+function formatEntryChatLogForPrompt(value) {
+  const messages = parseEntryChatLog(value)
+  if (!messages.length) return '未保存'
+  return messages
+    .map(message => `${message.role === 'assistant' ? '繁漪' : '观众'}：${message.content}`)
+    .join('\n')
+}
+
+function parseEntryChatLog(value) {
+  let raw = value
+  if (typeof value === 'string') {
+    try {
+      raw = JSON.parse(value)
+    } catch {
+      return []
+    }
+  }
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter(message => message && (message.role === 'user' || message.role === 'assistant'))
+    .map(message => ({
+      role: message.role,
+      content: String(message.content || '').trim().slice(0, 800),
+    }))
+    .filter(message => message.content)
+    .slice(-16)
+}
+
+function normalizeEntryProfile(value, fallback = {}) {
+  const source = parseEntryProfile(value)
+  return {
+    desire: compactProfileText(source.desire || fallback.desire, 14),
+    mood: compactProfileText(source.mood || fallback.mood, 10),
+    imagery: normalizeProfileImagery(source.imagery || fallback.imagery),
+    tendency: compactProfileText(source.tendency || fallback.tendency, 12),
+    quote: compactProfileText(source.quote || fallback.quote, 24),
+  }
+}
+
+function parseEntryProfile(value) {
+  if (!value) return {}
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value)
+      return parsed && typeof parsed === 'object' ? parsed : {}
+    } catch {
+      return {}
+    }
+  }
+  return typeof value === 'object' ? value : {}
+}
+
+function normalizeProfileImagery(value) {
+  if (!Array.isArray(value)) return []
+  const seen = new Set()
+  const result = []
+  for (const item of value) {
+    const text = compactProfileText(item, 8)
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    result.push(text)
+    if (result.length >= 4) break
+  }
+  return result
+}
+
+function compactProfileText(value, maxLength) {
+  return String(value || '')
+    .replace(/["'“”‘’{}[\]]/g, '')
+    .replace(/\s+/g, '')
+    .trim()
+    .slice(0, maxLength)
+}
+
+function normalizeSlotItems(items, fallback, kind) {
+  const seen = new Set()
+  const result = []
+  for (const item of [...(Array.isArray(items) ? items : []), ...(fallback || [])]) {
+    const text = normalizeGeneratedWord(item)
+    if (!text || seen.has(text)) continue
+    seen.add(text)
+    result.push(text)
+    if (result.length >= 8) break
+  }
+  return result
+}
+
+function normalizeGeneratedWord(value) {
+  return String(value || '')
+    .replace(/[，。；、,.!?！？;:\s]+/g, '')
+    .replace(/^["'“”‘’]+|["'“”‘’]+$/g, '')
+    .trim()
+    .slice(0, 12)
+}
+
 function handleWsMessage(ws, message) {
   const { type, payload = {} } = message
 
@@ -603,10 +857,7 @@ function handleWsMessage(ws, message) {
 }
 
 function upsertAnswer(answer) {
-  if (!answer.questionId) {
-    answers.push(answer)
-    return
-  }
+  if (!answer.questionId || !isCurrentAnswer(answer)) return
 
   const matchesSameAnswer = current => {
     if (answer.sessionId && current.sessionId) {
@@ -620,6 +871,15 @@ function upsertAnswer(answer) {
 
   answers = answers.filter(current => !matchesSameAnswer(current))
   answers.push(answer)
+}
+
+function isCurrentAnswer(answer) {
+  return answer && currentQuestionIds.has(String(answer.questionId || ''))
+}
+
+function filterCurrentAnswers(list) {
+  if (!Array.isArray(list)) return []
+  return list.filter(isCurrentAnswer)
 }
 
 function isAdminPinValid(value) {
@@ -670,10 +930,11 @@ function normalizeAnswer(input) {
 
 function setShowState(phase, page) {
   const safePhase = phaseOrder.includes(phase) ? phase : showState.phase
+  const safePage = clampShowPage(safePhase, page)
   showState = {
     ...showState,
     phase: safePhase,
-    page: Math.max(0, Number.isFinite(page) ? page : 0),
+    page: safePage,
     updatedAt: Date.now(),
   }
   persistStateSoon()
@@ -689,7 +950,6 @@ function resetShow() {
     updatedAt: Date.now(),
   }
   answers = []
-  generatedMaterials = []
   generatedMonologues = []
   sessions.clear()
   persistStateSoon()
@@ -701,7 +961,7 @@ function resetShow() {
 function buildStats() {
   const connectedAudience = [...sessions.values()].filter(s => s.connected)
   const audienceTotal = getAudienceTotal()
-  const perPhase = { act1: 0, act2: 0, act3: 0, act4: 0 }
+  const perPhase = { entry: 0, act1: 0, act2: 0, act3: 0 }
   const groupedAnswers = [[], [], [], []]
 
   for (const answer of answers) {
@@ -723,7 +983,7 @@ function buildStats() {
 
   const audienceCount = connectedAudience.length
   const completedSessions = new Set(
-    answers.filter(answer => answer.phase === 'act4' && answer.questionId === 'finalAction').map(answer => answer.sessionId)
+    answers.filter(answer => answer.phase === 'act3' && answer.questionId === 'roomBase').map(answer => answer.sessionId)
   )
 
   return {
@@ -736,7 +996,6 @@ function buildStats() {
     answers: groupedAnswers,
     questionCompletion: buildQuestionCompletion(audienceTotal),
     monologueReadiness: buildMonologueReadiness(audienceTotal),
-    generatedCount: generatedMaterials.length,
     monologueCount: generatedMonologues.length,
     monologues: latestMonologuesByKind(),
     updatedAt: Date.now(),
@@ -820,6 +1079,23 @@ function latestMonologuesByKind() {
     result[kind] = [...generatedMonologues].reverse().find(item => item.kind === kind) || null
     return result
   }, {})
+}
+
+function normalizeShowState(state) {
+  const phase = phaseOrder.includes(state?.phase) ? state.phase : 'entry'
+  const page = clampShowPage(phase, state?.page)
+  return {
+    phase,
+    page,
+    status: String(state?.status || 'running'),
+    updatedAt: Number(state?.updatedAt || Date.now()),
+  }
+}
+
+function clampShowPage(phase, page) {
+  const maxPage = phase === 'entry' ? 4 : phase === 'act1' ? 2 : phase === 'act2' ? 3 : 2
+  const value = Number.isFinite(Number(page)) ? Number(page) : 0
+  return Math.max(0, Math.min(value, maxPage))
 }
 
 function broadcastStats() {

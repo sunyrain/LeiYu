@@ -136,7 +136,7 @@ html, body {
 
 .page p {
   width: min(100%, 380px);
-  font-size: 19px;
+  font-size: 21px;
   font-weight: 300;
   line-height: 2;
   letter-spacing: 0;
@@ -192,7 +192,7 @@ html, body {
 .page:has(.line-input) p,
 .page:has(.choices) p {
   width: min(100%, 380px);
-  font-size: 18px;
+  font-size: 20px;
   line-height: 1.9;
   margin-bottom: 12px;
 }
@@ -482,6 +482,42 @@ textarea:focus {
 .highlight {
   color: #f0c979;
   text-shadow: 0 0 18px rgba(255, 166, 56, 0.2);
+}
+
+.front-page {
+  padding-top: calc(74px + env(safe-area-inset-top));
+  padding-bottom: calc(54px + env(safe-area-inset-bottom));
+}
+
+.front-page p {
+  width: min(100%, 430px);
+  max-width: 430px;
+  font-size: 21px;
+  line-height: 1.9;
+  margin-bottom: 8px;
+}
+
+.front-page .hint-line {
+  width: min(100%, 410px);
+  font-size: 15px !important;
+  line-height: 1.8 !important;
+  margin: 2px 0 8px;
+}
+
+.front-page input[type="text"],
+.front-page .line-input {
+  width: min(100%, 340px);
+  font-size: 20px;
+}
+
+.front-page .btn {
+  min-width: 128px;
+  margin-top: 12px;
+}
+
+.front-page .waiting-state p {
+  font-size: 24px;
+  line-height: 1.8;
 }
 
 .page:has(textarea) > .btn,

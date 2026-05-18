@@ -143,22 +143,6 @@ export function triggerLlm() {
   sendMessage('admin:trigger-llm', {})
 }
 
-export async function generateMaterials(userContext) {
-  const response = await fetch('/api/generate-materials', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      sessionId: getSessionId(),
-      roomNumber: getRoomNumber(),
-      userContext,
-    }),
-  })
-
-  if (!response.ok) throw new Error(`LLM API error: ${response.status}`)
-  const data = await response.json()
-  return data.materials
-}
-
 export async function generateMonologue(kind) {
   const response = await fetch('/api/generate-monologue', {
     method: 'POST',

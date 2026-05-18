@@ -132,43 +132,6 @@
       </div>
     </section>
 
-    <section class="monologue-section">
-      <h2>演员独白</h2>
-      <div class="monologue-actions">
-        <button
-          v-for="item in monologueTypes"
-          :key="item.kind"
-          class="action-btn"
-          :disabled="monologueBusy === item.kind"
-          @click="generateActorMonologue(item.kind)"
-        >
-          <span class="monologue-action-main">{{ monologueBusy === item.kind ? '生成中...' : item.label }}</span>
-          <span class="monologue-action-rate">{{ monologueReadinessLabel(item.kind) }}</span>
-        </button>
-      </div>
-      <div v-if="monologueError" class="admin-error">{{ monologueError }}</div>
-      <div class="monologue-grid">
-        <div v-for="item in monologueTypes" :key="item.kind" class="monologue-card">
-          <div class="monologue-title">{{ item.title }}</div>
-          <div class="monologue-readiness">
-            <span>{{ monologueReadinessLabel(item.kind) }}</span>
-            <span v-if="getMonologueReadiness(item.kind).details.length">最低单题 {{ getMonologueReadiness(item.kind).minRate }}%</span>
-          </div>
-          <div v-if="getMonologueReadiness(item.kind).details.length" class="monologue-question-list">
-            <span
-              v-for="detail in getMonologueReadiness(item.kind).details"
-              :key="detail.questionId"
-              class="monologue-question-chip"
-            >
-              {{ answerQuestionLabels[detail.questionId] || detail.questionId }} {{ detail.rate }}%
-            </span>
-          </div>
-          <p v-if="latestMonologues[item.kind]?.text">{{ latestMonologues[item.kind].text }}</p>
-          <p v-else class="empty-state">尚未生成</p>
-        </div>
-      </div>
-    </section>
-
     <section class="quick-actions">
       <h2>快捷操作</h2>
       <div class="action-buttons">
@@ -184,8 +147,6 @@ import {
   backendStatus,
   getAdminPin,
   connectBackend,
-  fetchMonologues,
-  generateMonologue,
   onBackendEvent,
   resetShow,
   setAdminPin,
@@ -199,24 +160,15 @@ const currentPage = ref(0)
 const activeTab = ref(0)
 const expandedAnswerGroup = ref('')
 const answers = ref([[], [], [], []])
-const latestMonologues = ref({
-  monologue1: null,
-  monologue2: null,
-  monologue3: null,
-})
-const monologueBusy = ref('')
-const monologueError = ref('')
 const pinInput = ref(getAdminPin())
 const adminUnlocked = ref(Boolean(getAdminPin()))
 const authError = ref('')
 
 const phaseLabels = {
   entry: '进场',
-  prologue: '序章',
   act1: '交互1',
   act2: '交互2',
   act3: '交互3',
-  act4: '交互4',
 }
 
 const controllablePhaseLabels = {
@@ -224,7 +176,6 @@ const controllablePhaseLabels = {
   act1: phaseLabels.act1,
   act2: phaseLabels.act2,
   act3: phaseLabels.act3,
-  act4: phaseLabels.act4,
 }
 
 const stats = ref({
@@ -233,37 +184,30 @@ const stats = ref({
   currentRoundSubmissions: 0,
   completionRate: 0,
   questionCompletion: {},
-  monologueReadiness: {},
 })
 
 const answerPhaseTabs = [
-  { index: 0, phase: 'act1', label: '交互1' },
-  { index: 1, phase: 'act2', label: '交互2' },
-  { index: 2, phase: 'act3', label: '交互3' },
-  { index: 3, phase: 'act4', label: '交互4' },
+  { index: 0, phase: 'entry', label: '进场' },
+  { index: 1, phase: 'act1', label: '交互1' },
+  { index: 2, phase: 'act2', label: '交互2' },
+  { index: 3, phase: 'act3', label: '交互3' },
 ]
 
 const answerQuestionOrder = {
-  act1: ['floodItem', 'lovedOneName', 'departureAction', 'reunionAction'],
-  act2: ['noticeAction', 'riverAction'],
-  act3: ['roomBase', 'identity', 'poemMaterials'],
-  act4: ['mirrorSelf', 'finalTransform', 'objectAction', 'finalAction'],
+  entry: ['entryWish'],
+  act1: ['lovedOneName'],
+  act2: ['leaveChoice', 'departureAction', 'reunionAction'],
+  act3: ['poemMaterials', 'roomBase'],
 }
 
 const answerQuestionLabels = {
-  floodItem: '暴雨中带走的三件物品',
+  entryWish: '进场聊天意图',
   lovedOneName: '心中想起的人',
+  leaveChoice: '我要离开Ta吗',
   departureAction: 'Ta 要走了，你想',
   reunionAction: '如果 Ta 重新出现',
-  noticeAction: '你忽然想要',
-  riverAction: '河水涨到脚边',
   roomBase: '房间构成',
-  identity: '看见房间后',
-  poemMaterials: '生成素材',
-  mirrorSelf: '镜子里是',
-  finalTransform: '名字正在变成',
-  objectAction: '物件亮晶晶时',
-  finalAction: '最终结局',
+  poemMaterials: '扩展词库',
 }
 
 const currentAnswers = computed(() => answers.value[activeTab.value] || [])
@@ -271,22 +215,15 @@ const currentAnswerPhase = computed(() => answerPhaseTabs[activeTab.value] || an
 const phaseAnswerCounts = computed(() => answerPhaseTabs.map(tab => (answers.value[tab.index] || []).length))
 const currentAnswerGroups = computed(() => groupAnswersByQuestion(currentAnswers.value, currentAnswerPhase.value.phase))
 
-const monologueTypes = [
-  { kind: 'monologue1', label: '生成独白1', title: '独白1-呼唤爱人', questions: ['lovedOneName'] },
-  { kind: 'monologue2', label: '生成独白2', title: '独白2-动作指令', questions: [] },
-  { kind: 'monologue3', label: '生成独白3', title: '独白3-想象房间', questions: ['roomBase'] },
-]
-
 const showCues = [
+  { code: '进场', phase: 'entry', page: 0 },
   { code: '交互1-1', phase: 'act1', page: 0 },
-  { code: '交互1-2', phase: 'act1', page: 6 },
-  { code: '交互1-3', phase: 'act1', page: 7 },
-  { code: '交互2-1', phase: 'act2', page: 0 },
-  { code: '交互2-2', phase: 'act2', page: 4 },
-  { code: '交互2-3', phase: 'act2', page: 6 },
+  { code: '交互1-2', phase: 'act1', page: 1 },
+  { code: '交互1-3', phase: 'act1', page: 2 },
+  { code: '交互2', phase: 'act2', page: 0 },
   { code: '交互3-1', phase: 'act3', page: 0 },
-  { code: '交互3-2', phase: 'act3', page: 4 },
-  { code: '交互4', phase: 'act4', page: 0 },
+  { code: '交互3-2', phase: 'act3', page: 1 },
+  { code: '交互3-3', phase: 'act3', page: 2 },
 ]
 
 const currentPhaseCues = computed(() => showCues.filter(cue => cue.phase === currentPhase.value))
@@ -376,41 +313,6 @@ function getQuestionCompletion(questionId) {
   }
 }
 
-function getMonologueReadiness(kind) {
-  const fallbackQuestions = monologueTypes.find(item => item.kind === kind)?.questions || []
-  if (!fallbackQuestions.length) {
-    return stats.value.monologueReadiness?.[kind] || {
-      questions: [],
-      details: [],
-      answered: 0,
-      total: 0,
-      rate: 100,
-      minRate: 100,
-      missingQuestions: [],
-    }
-  }
-
-  const fallbackDetails = fallbackQuestions.map(questionId => ({
-    questionId,
-    ...getQuestionCompletion(questionId),
-  }))
-  return stats.value.monologueReadiness?.[kind] || {
-    questions: fallbackQuestions,
-    details: fallbackDetails,
-    answered: fallbackDetails.reduce((sum, item) => sum + item.answered, 0),
-    total: (stats.value.audienceTotal || 0) * fallbackQuestions.length,
-    rate: 0,
-    minRate: fallbackDetails.length ? Math.min(...fallbackDetails.map(item => item.rate)) : 0,
-    missingQuestions: fallbackDetails.filter(item => item.rate === 0).map(item => item.questionId),
-  }
-}
-
-function monologueReadinessLabel(kind) {
-  const readiness = getMonologueReadiness(kind)
-  if (!readiness.details.length) return '无需观众回答'
-  return `支持素材 ${readiness.rate}%`
-}
-
 function buildAnswerSummary(items) {
   const counts = new Map()
   items.forEach(answer => {
@@ -457,31 +359,6 @@ function downloadAnswers(format) {
   window.open(url.toString(), '_blank', 'noopener')
 }
 
-async function refreshMonologues() {
-  try {
-    const data = await fetchMonologues()
-    if (data.latest) latestMonologues.value = data.latest
-  } catch (error) {
-    monologueError.value = error.message
-  }
-}
-
-async function generateActorMonologue(kind) {
-  monologueBusy.value = kind
-  monologueError.value = ''
-  try {
-    const data = await generateMonologue(kind)
-    latestMonologues.value = {
-      ...latestMonologues.value,
-      [kind]: data.record || data,
-    }
-  } catch (error) {
-    monologueError.value = error.message
-  } finally {
-    monologueBusy.value = ''
-  }
-}
-
 function resetAll() {
   if (!confirm('确定要重置所有观众状态？')) return
   resetShow()
@@ -497,13 +374,11 @@ function unlockAdmin() {
   adminUnlocked.value = true
   authError.value = ''
   connectBackend('admin')
-  refreshMonologues()
 }
 
 onMounted(() => {
   if (adminUnlocked.value) {
     connectBackend('admin')
-    refreshMonologues()
   }
 
   removeStateListener = onBackendEvent('state', state => {
@@ -518,9 +393,7 @@ onMounted(() => {
     stats.value.currentRoundSubmissions = data.currentRoundSubmissions || 0
     stats.value.completionRate = data.completionRate || 0
     stats.value.questionCompletion = data.questionCompletion || {}
-    stats.value.monologueReadiness = data.monologueReadiness || {}
     if (data.answers) answers.value = data.answers
-    if (data.monologues) latestMonologues.value = data.monologues
   })
 
   removeErrorListener = onBackendEvent('error', data => {
